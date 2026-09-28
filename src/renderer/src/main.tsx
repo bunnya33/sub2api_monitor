@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Check, Eye, EyeOff, LogOut, RefreshCw, Settings2, Upload, X } from 'lucide-react';
-import { alias, color, defaults, ink, metric, migrateLegacyPalette, needsLightInk, outlineInk, percent, shortName, summaryPeriods,
+import { alias, color, defaults, ink, metric, migrateLegacyPalette, needsLightInk, outlineInk, percent, shortName, summaryPeriods, supportsFive, visiblePeriods,
   type DesktopAPI, type Period, type Quota, type QuotaWindow, type Settings, type Snapshot } from '../../shared/model';
 import { size } from '../../shared/geometry';
 import './style.css';
@@ -16,7 +16,7 @@ function browserPreview(): DesktopAPI {
   const now = Date.now();
   const quotas: Quota[] = [
     { id: 1, name: '示例 C1', platform: 'anthropic', type: 'oauth', status: 'active', five: { used: 32, resetsAt: now + 8280000 }, seven: { used: 58, resetsAt: now + 280800000 } },
-    { id: 2, name: '示例 O2', platform: 'openai', type: 'oauth', status: 'active', five: { used: 19, resetsAt: now + 14700000 }, seven: { used: 84, resetsAt: now + 129600000 } }
+    { id: 2, name: '示例 O2', platform: 'openai', type: 'oauth', status: 'active', planType: 'pro_5x', five: { used: 19, resetsAt: now + 14700000 }, seven: { used: 84, resetsAt: now + 129600000 } }
   ].map(value => ({ ...value, source: 'demo', updatedAt: now, fetchedAt: now, error: null }));
   let settings: Settings;
   try {
@@ -55,17 +55,18 @@ const reset = (value: number | null) => {
   const delta = Math.max(0, value - Date.now()), hours = Math.floor(delta / 3600000), minutes = Math.floor(delta / 60000) % 60;
   return hours >= 24 ? `${Math.floor(hours / 24)}天${hours % 24}小时后重置` : `${hours}小时${minutes}分后重置`;
 };
-function Meter({ quota, settings, label }: { quota: QuotaWindow | null; settings: Settings; label: string }) {
+function Meter({ quota, settings, label, period }: { quota: QuotaWindow | null; settings: Settings; label: string; period?: Period }) {
   const value = quota ? Math.max(0, Math.min(100, metric(quota.used, settings))) : 0;
   const fill = quota ? color(quota.used, settings) : '#aeb8b3';
   const textColor = quota ? ink(fill) : undefined;
   const text = percent(quota, settings);
-  return <div className={`meter ${settings.textOutline ? 'outlined' : ''}`} style={{ '--meter-outline': settings.textOutline && textColor ? outlineInk(textColor) : undefined } as React.CSSProperties}
+  return <div className={`meter ${settings.textOutline ? 'outlined' : ''} ${period ? 'meter-tagged' : ''}`} style={{ '--meter-outline': settings.textOutline && textColor ? outlineInk(textColor) : undefined } as React.CSSProperties}
     role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100}
     aria-valuenow={quota ? value : undefined} aria-valuetext={quota ? text : '暂无数据'} title={`${label} · ${text}`}>
     <span className="meter-value" style={{ color: quota && !needsLightInk(fill) ? textColor : undefined }}>{text}</span>
     {quota && <><span className="meter-fill" style={{ width: `${value}%`, backgroundColor: fill }}/>
       <span className="meter-value meter-foreground" style={{ color: textColor, clipPath: `inset(0 ${100 - value}% 0 0)` }}>{text}</span></>}
+    {period && <span className="meter-tag" aria-hidden="true">{period === 'five' ? '5h' : '7d'}</span>}
   </div>;
 }
 function useSnapshot() {
@@ -94,6 +95,7 @@ function useSnapshot() {
 }
 function Floating({ state, ghost = false }: { state: Snapshot; ghost?: boolean }) {
   const settings = state.settings, active = state.quotas[state.rotatingIndex % Math.max(1, state.quotas.length)];
+  const dockPeriods = active ? summaryPeriods(active, settings) : [];
   const pressed = useRef(false);
   function down(event: React.PointerEvent<HTMLDivElement>) {
     if (event.button !== 0) return;
@@ -110,19 +112,19 @@ function Floating({ state, ghost = false }: { state: Snapshot; ghost?: boolean }
   }
   const collapsed = state.collapsed && !!state.edge;
   return <div className={`floating ${collapsed ? `docked ${state.edge}` : ''} ${ghost ? 'snap-ghost' : ''}`} style={{ '--bar-width': `${settings.barWidth}px`,
-    ...(preview ? size(settings, state.quotas, state.edge, collapsed) : {}) } as React.CSSProperties} onPointerDown={ghost ? undefined : down} onPointerMove={ghost ? undefined : event => { if (pressed.current) window.desktop.dragMove(event.screenX, event.screenY); }} onPointerUp={ghost ? undefined : up} onLostPointerCapture={ghost ? undefined : () => { if (pressed.current) { pressed.current = false; window.desktop.drag(false); } }}
+    ...(preview ? size(settings, state.quotas, state.edge, collapsed, state.rotatingIndex) : {}) } as React.CSSProperties} onPointerDown={ghost ? undefined : down} onPointerMove={ghost ? undefined : event => { if (pressed.current) window.desktop.dragMove(event.screenX, event.screenY); }} onPointerUp={ghost ? undefined : up} onLostPointerCapture={ghost ? undefined : () => { if (pressed.current) { pressed.current = false; window.desktop.drag(false); } }}
     onPointerEnter={ghost ? undefined : () => window.desktop.hover('floating', true)} onPointerLeave={ghost ? undefined : () => window.desktop.hover('floating', false)}
     onContextMenu={ghost ? undefined : event => { event.preventDefault(); window.desktop.openContextMenu(event.screenX, event.screenY); }}>
     {collapsed && active ? <div className={`dock-content ${state.edge === 'left' || state.edge === 'right' ? 'vertical' : 'horizontal'}`}>
       <span className="dock-name" title={alias(active, settings)}>{shortName(active, settings, state.rotatingIndex)}</span>
-      <div className="dock-bars">{summaryPeriods(active, settings).map(period => <Meter key={period} quota={active[period]} settings={settings}
-        label={`${alias(active, settings)} · ${period === 'five' ? '5 小时' : '7 天'}`} />)}</div>
+      <div className="dock-bars">{dockPeriods.length ? dockPeriods.map(period => <Meter key={period} quota={active[period]} settings={settings} period={period}
+        label={`${alias(active, settings)} · ${period === 'five' ? '5 小时' : '7 天'}`} />) : <span className="dock-empty">--</span>}</div>
     </div> : <div className="floating-rows">
       {state.quotas.length ? state.quotas.map(account => <div className="floating-row" key={account.id}>
         <span className="account-name" title={account.name + (settings.aliases[String(account.id)] ? ` · 别名 ${alias(account, settings)}` : '') + (account.error ? ` · ${account.error}` : '')}
           style={{ width: settings.nameWidth }}>{alias(account, settings)}</span>
-        {settings.showFive && <Meter quota={account.five} settings={settings} label={`${alias(account, settings)} · 5 小时`} />}
-        <Meter quota={account.seven} settings={settings} label={`${alias(account, settings)} · 7 天`} />
+        {visiblePeriods(account, settings).map(period => <Meter key={period} quota={account[period]} settings={settings} period={period}
+          label={`${alias(account, settings)} · ${period === 'five' ? '5 小时' : '7 天'}`} />)}
       </div>) : <div className="floating-empty">{state.connection.status === 'authenticating' ? '连接中…' : '未登录'}</div>}
     </div>}
   </div>;
@@ -135,10 +137,10 @@ function Detail({ state }: { state: Snapshot }) {
     </div></header>
     <main className="detail-list">{state.quotas.length ? state.quotas.map(account => <section className="detail-account" key={account.id}>
       <div className="detail-title"><strong title={account.name}>{alias(account, state.settings)}</strong><span>{account.error ? '缓存' : account.status === 'active' ? '可用' : account.status}</span></div>
-      <div className="detail-sub">{platform(account.platform)} · {account.type} · {account.source === 'passive' ? '被动采样' : account.source === 'active' ? '服务端查询' : account.source === 'demo' ? '演示数据' : '服务端快照'}</div>
-      <div className="detail-windows">{(['five', 'seven'] as Period[]).map(period => <div key={period}>
+      <div className="detail-sub">{platform(account.platform)} · {account.type}{account.planType ? ` · ${account.planType}` : ''} · {account.source === 'passive' ? '被动采样' : account.source === 'active' ? '服务端查询' : account.source === 'demo' ? '演示数据' : '服务端快照'}</div>
+      <div className={`detail-windows ${supportsFive(account) ? '' : 'single'}`}>{(supportsFive(account) ? ['five', 'seven'] as Period[] : ['seven'] as Period[]).map(period => <div key={period}>
         <div className="window-label">{period === 'five' ? '5 小时' : '7 天'} · {state.settings.metric === 'used' ? '已用' : '剩余'}</div>
-        <Meter quota={account[period]} settings={state.settings} label={`${alias(account, state.settings)} · ${period === 'five' ? '5 小时' : '7 天'}`}/>
+        <Meter quota={account[period]} settings={state.settings} period={period} label={`${alias(account, state.settings)} · ${period === 'five' ? '5 小时' : '7 天'}`}/>
         <div className="reset" title={account[period]?.resetsAt ? time(account[period]!.resetsAt) : '未知'}>{reset(account[period]?.resetsAt ?? null)}</div>
       </div>)}</div>
       <div className="detail-times">源数据 {time(account.updatedAt)}<br/>本次读取 {time(account.fetchedAt)}</div>
@@ -196,6 +198,7 @@ function Settings({ state }: { state: Snapshot }) {
       {tab === 'display' && <>
         {choice('百分比含义', state.settings.metric, [['used', '已用'], ['remaining', '剩余']], 'metric')}
         {checkbox('显示 5 小时额度', 'showFive')}
+        {checkbox('显示 7 天额度', 'showSeven')}
         {checkbox('贴边自动收起', 'autoCollapse')}
         {number('进度条宽度', 'barWidth', 40, 240, 'px')}
         {number('名称宽度', 'nameWidth', 36, 200, 'px')}
@@ -249,7 +252,7 @@ function Settings({ state }: { state: Snapshot }) {
       {tab === 'accounts' && <div className="account-list">{state.available.length ? state.available.map(account => <div className="account-setting" key={account.id}>
         <label className="account-select"><input type="checkbox" checked={state.settings.selectedIds.includes(account.id)} onChange={event => void update({ selectedIds: event.target.checked
           ? [...state.settings.selectedIds, account.id] : state.settings.selectedIds.filter(id => id !== account.id) })}/>
-          <span><strong title={account.name}>{account.name}</strong><small>{platform(account.platform)} · {account.type} · {account.status}</small></span></label>
+          <span><strong title={account.name}>{account.name}</strong><small>{platform(account.platform)} · {account.type}{account.planType ? ` · ${account.planType}` : ''} · {account.status}</small></span></label>
         <label className="alias-field">别名<input type="text" maxLength={40} key={`${account.id}-${state.settings.aliases[String(account.id)] ?? ''}`}
           defaultValue={state.settings.aliases[String(account.id)] ?? ''} placeholder="浮球显示名称"
           onBlur={event => void update({ aliases: { ...state.settings.aliases, [String(account.id)]: event.target.value.trim() } })}

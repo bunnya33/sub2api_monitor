@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { emptyQuota, type Account, type LoginInput, type Quota, type QuotaWindow } from '../shared/model';
 
-const accountSchema = z.object({ id: z.number().int().positive(), name: z.string(), platform: z.string(), type: z.string(), status: z.string().default('active') });
+const accountSchema = z.object({ id: z.number().int().positive(), name: z.string(), platform: z.string(), type: z.string(), status: z.string().default('active'),
+  credentials: z.record(z.string(), z.unknown()).nullish(), parent_plan_type: z.string().nullish() });
 const tokenSchema = z.object({ access_token: z.string().min(1), refresh_token: z.string().optional(), expires_in: z.number().optional() });
 const userSchema = z.object({ role: z.string(), email: z.string().optional() });
 export interface SavedSession { server: string; email: string; refreshToken: string }
@@ -120,7 +121,8 @@ export class Sub2ApiClient {
     const accounts: Account[] = [];
     for (let page = 1; page <= 100; page++) {
       const data = z.object({ items: z.array(accountSchema), total: z.number() }).parse(await this.request(`/admin/accounts?page=${page}&page_size=100&lite=true`, signal));
-      accounts.push(...data.items.map(item => ({ id: item.id, name: item.name, platform: item.platform, type: item.type, status: item.status })));
+      accounts.push(...data.items.map(item => ({ id: item.id, name: item.name, platform: item.platform, type: item.type, status: item.status,
+        planType: typeof item.credentials?.plan_type === 'string' && item.credentials.plan_type.trim() ? item.credentials.plan_type.trim() : item.parent_plan_type || undefined })));
       if (accounts.length >= data.total || data.items.length === 0) return accounts;
     }
     throw new ApiError('账号分页数量超过客户端限制');

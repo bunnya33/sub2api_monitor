@@ -5,7 +5,7 @@ import { ApiError, normalizeServer, Sub2ApiClient, type Fetcher, type SessionVau
 export function demoQuotas(now = Date.now()): Quota[] {
   return [
     { id: 1, name: '示例 C1', platform: 'anthropic', type: 'oauth', status: 'active', five: { used: 32, resetsAt: now + 8280000 }, seven: { used: 58, resetsAt: now + 280800000 } },
-    { id: 2, name: '示例 O2', platform: 'openai', type: 'oauth', status: 'active', five: { used: 19, resetsAt: now + 14700000 }, seven: { used: 84, resetsAt: now + 129600000 } }
+    { id: 2, name: '示例 O2', platform: 'openai', type: 'oauth', status: 'active', planType: 'pro_5x', five: { used: 19, resetsAt: now + 14700000 }, seven: { used: 84, resetsAt: now + 129600000 } }
   ].map(a => ({ ...a, source: 'demo', updatedAt: now, fetchedAt: now, error: null }));
 }
 export class Controller extends EventEmitter {

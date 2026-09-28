@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 export const settingsSchema = z.object({
-  metric: z.enum(['used', 'remaining']), showFive: z.boolean(), autoCollapse: z.boolean(),
+  metric: z.enum(['used', 'remaining']), showFive: z.boolean(), showSeven: z.boolean(), autoCollapse: z.boolean(),
   summary: z.enum(['worst', 'both', 'five', 'seven']), barWidth: z.number().int().min(40).max(240),
   nameWidth: z.number().int().min(36).max(200), topWidth: z.number().int().min(120).max(400),
   sideWidth: z.number().int().min(48).max(240), autoRefresh: z.boolean(),
@@ -15,7 +15,7 @@ export const settingsSchema = z.object({
 });
 export type Settings = z.infer<typeof settingsSchema>;
 export const defaults: Settings = {
-  metric: 'used', showFive: true, autoCollapse: true, summary: 'worst', barWidth: 68,
+  metric: 'used', showFive: true, showSeven: true, autoCollapse: true, summary: 'worst', barWidth: 68,
   nameWidth: 62, topWidth: 178, sideWidth: 64, autoRefresh: true, refreshSeconds: 60, rotateSeconds: 4,
   fadeInactive: true, inactiveOpacity: 65, normalColor: '#22c55e', warningColor: '#f59e0b',
   criticalColor: '#ef4444', textOutline: false, fontSize: 12, fontBold: false, fontName: '', rememberSession: true,
@@ -24,7 +24,7 @@ export const defaults: Settings = {
 export type Edge = 'left' | 'right' | 'top' | 'bottom' | null;
 export type Period = 'five' | 'seven';
 export interface Rect { x: number; y: number; width: number; height: number }
-export interface Account { id: number; name: string; platform: string; type: string; status: string }
+export interface Account { id: number; name: string; platform: string; type: string; status: string; planType?: string }
 export interface QuotaWindow { used: number; resetsAt: number | null }
 export interface Quota extends Account {
   five: QuotaWindow | null; seven: QuotaWindow | null; source: string;
@@ -113,10 +113,22 @@ export function ink(hex: string): string {
 export function outlineInk(textColor: string): string {
   return `#${rgb(textColor).map(channel => Math.round(channel * .35).toString(16).padStart(2, '0')).join('')}`;
 }
+export function supportsFive(account: Account): boolean {
+  const plan = account.planType?.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!plan) return true;
+  return !(/^(?:(?:chatgpt)?pro(?:\d+x)?|\d+xpro|(?:claude)?max(?:\d+x)?)$/.test(plan)
+    || ['team', 'business', 'enterprise', 'ultra', 'free'].includes(plan));
+}
+export function visiblePeriods(account: Account, settings: Settings): Period[] {
+  const periods: Period[] = [];
+  if (settings.showFive && supportsFive(account)) periods.push('five');
+  if (settings.showSeven) periods.push('seven');
+  return periods;
+}
 export function summaryPeriods(account: Quota, settings: Settings): Period[] {
-  if (!settings.showFive) return ['seven'];
-  if (settings.summary === 'both') return ['five', 'seven'];
-  if (settings.summary !== 'worst') return [settings.summary];
+  const available = visiblePeriods(account, settings);
+  if (available.length < 2 || settings.summary === 'both') return available;
+  if (settings.summary !== 'worst') return available.includes(settings.summary) ? [settings.summary] : available;
   return [(account.five?.used ?? -1) >= (account.seven?.used ?? -1) ? 'five' : 'seven'];
 }
 export function emptyQuota(account: Account): Quota {

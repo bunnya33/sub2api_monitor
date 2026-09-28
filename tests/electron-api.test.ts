@@ -11,6 +11,22 @@ const response = (data: unknown, status = 200, headers?: HeadersInit) =>
   new Response(JSON.stringify({ code: 0, data }), { status, headers });
 
 describe('sub2api 0.2.8 session and usage', () => {
+  it('reads only the account plan from the redacted 0.2.8 list', async () => {
+    const client = new Sub2ApiClient('https://example.invalid', new MemoryVault(), false, async url => {
+      const route = new URL(url).pathname;
+      if (route.endsWith('/login')) return response({ access_token: 'access' });
+      if (route.endsWith('/me')) return response({ role: 'admin' });
+      return response({ items: [
+        { id: 1, name: 'Plus', platform: 'openai', type: 'oauth', status: 'active', credentials: { plan_type: 'plus', access_token: 'must-not-copy' } },
+        { id: 2, name: 'Pro', platform: 'openai', type: 'oauth', status: 'active', credentials: { plan_type: 'pro_5x' } },
+        { id: 3, name: 'Shadow', platform: 'openai', type: 'oauth', status: 'active', parent_plan_type: 'max_20x' }
+      ], total: 3 });
+    });
+    await client.login({ server: 'https://example.invalid', email: 'admin@example.com', password: 'secret' });
+    const accounts = await client.listAccounts();
+    expect(accounts.map(item => item.planType)).toEqual(['plus', 'pro_5x', 'max_20x']);
+    expect(JSON.stringify(accounts)).not.toContain('must-not-copy');
+  });
   it('passes the exact 2FA fields and persists only after admin verification', async () => {
     const vault = new MemoryVault();
     const calls: string[] = [];

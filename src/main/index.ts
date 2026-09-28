@@ -3,7 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'nod
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { clampRect, detailRect, size, snapEdge } from '../shared/geometry';
-import { loginSchema, settingsSchema, summaryPeriods, type Edge, type LoginInput, type Rect, type Settings, type Snapshot } from '../shared/model';
+import { loginSchema, settingsSchema, type Edge, type LoginInput, type Rect, type Settings, type Snapshot } from '../shared/model';
 import { Controller } from './controller';
 import { Store, type Configuration } from './store';
 
@@ -70,9 +70,7 @@ function resizeFloating(position?: { x: number; y: number }): void {
   if (!floating || floating.isDestroyed()) return;
   const old = floating.getBounds();
   const accounts = controller.state.quotas;
-  const current = accounts.length ? accounts[rotatingIndex % accounts.length] : null;
-  const periods = current ? summaryPeriods(current, controller.state.settings).length : 1;
-  const target = size(controller.state.settings, accounts, edge, !!(edge && controller.state.settings.autoCollapse));
+  const target = size(controller.state.settings, accounts, edge, !!(edge && controller.state.settings.autoCollapse), rotatingIndex);
   const proposed = { x: position?.x ?? old.x, y: position?.y ?? old.y, ...target };
   const work = displayFor(proposed).workArea;
   floating.setBounds(clampRect(proposed, work, edge));
@@ -102,7 +100,7 @@ function moveFloatingDuringDrag(x: number, y: number): void {
     url(snapPreview, 'snap-preview');
     snapPreview.on('closed', () => { snapPreview = null; });
   }
-  const target = size(controller.state.settings, controller.state.quotas, candidate, controller.state.settings.autoCollapse);
+  const target = size(controller.state.settings, controller.state.quotas, candidate, controller.state.settings.autoCollapse, rotatingIndex);
   snapPreview.setBounds(clampRect({ ...contained, ...target }, work, candidate));
   if (!snapPreview.isVisible()) snapPreview.showInactive();
   if (changed) publish();

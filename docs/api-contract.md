@@ -15,7 +15,7 @@
 
 管理员接口使用 `Authorization: Bearer <access_token>`。普通推理 Key 不适用。响应外层采用 sub2api 的 `{code, message, data}`；错误响应与 HTTP 状态都要处理。
 
-账号列表响应包含 `items`、`total`、`page`、`page_size` 等分页信息。仅提取 `id`、`name`、`platform`、`type`、`status`，不保存账号的 `credentials` 或写入日志。HTTPS 使用正常证书校验，HTTP 请求不跟随重定向。
+账号列表响应包含 `items`、`total`、`page`、`page_size` 等分页信息。提取 `id`、`name`、`platform`、`type`、`status` 和脱敏 `credentials.plan_type`（影子账号回退到 `parent_plan_type`），只保留档位字符串，不保存完整 `credentials` 或写入日志。档位用于 5 小时额度的显示规则；缺少档位时不推断账号为 Plus 或 Pro。HTTPS 使用正常证书校验，HTTP 请求不跟随重定向。
 
 0.2.8 使用单账号接口，当前客户端不请求新版批量接口。单账号信息包含 `source`、`updated_at`、`five_hour`、`seven_day`。各窗口的 `utilization` 是已用百分比，`resets_at` 是重置时间，`remaining_seconds` 是服务端给出的剩余秒数。
 

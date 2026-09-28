@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { alias, color, defaults, ink, migrateLegacyPalette, outlineInk, percent, severity, shortName, summaryPeriods, type Quota } from '../src/shared/model';
+import { alias, color, defaults, ink, migrateLegacyPalette, outlineInk, percent, severity, shortName, summaryPeriods, supportsFive, visiblePeriods, type Quota } from '../src/shared/model';
 import { clampRect, detailRect, size, snapEdge } from '../src/shared/geometry';
 import { mapUsage, normalizeServer } from '../src/main/api';
 
@@ -12,6 +12,25 @@ describe('compact quota display', () => {
     expect(size({ ...defaults, showFive: false }, [quota, quota], null, false)).toEqual({ width: 150, height: 64 });
     expect(size({ ...defaults, nameWidth: 100, barWidth: 96 }, [quota, quota], null, false)).toEqual({ width: 318, height: 64 });
     expect(size(defaults, [quota], 'top', true)).toEqual({ width: 178, height: 32 });
+  });
+  it('uses available periods for Plus and higher-tier accounts', () => {
+    const plus = { ...quota, planType: 'plus' }, pro = { ...quota, planType: 'pro_5x' };
+    expect(supportsFive(plus)).toBe(true);
+    expect(supportsFive(pro)).toBe(false);
+    expect(supportsFive({ ...quota, planType: '5x Pro' })).toBe(false);
+    expect(supportsFive({ ...quota, planType: 'Max 20x' })).toBe(false);
+    expect(supportsFive({ ...quota, planType: 'Max 50x' })).toBe(false);
+    expect(supportsFive(quota)).toBe(true);
+    expect(visiblePeriods(plus, defaults)).toEqual(['five', 'seven']);
+    expect(visiblePeriods(pro, defaults)).toEqual(['seven']);
+    expect(summaryPeriods(pro, { ...defaults, summary: 'five' })).toEqual(['seven']);
+    expect(visiblePeriods(plus, { ...defaults, showSeven: false })).toEqual(['five']);
+    expect(visiblePeriods(pro, { ...defaults, showSeven: false })).toEqual([]);
+    expect(size(defaults, [pro], null, false)).toEqual({ width: 150, height: 36 });
+    expect(size(defaults, [plus, pro], null, false)).toEqual({ width: 224, height: 64 });
+    expect(size({ ...defaults, showSeven: false }, [plus, pro], null, false)).toEqual({ width: 150, height: 64 });
+    expect(size({ ...defaults, summary: 'both' }, [plus, pro], 'left', true, 0).height).toBe(78);
+    expect(size({ ...defaults, summary: 'both' }, [plus, pro], 'left', true, 1).height).toBe(52);
   });
   it('uses account alias without changing the server account name', () => {
     const settings = { ...defaults, aliases: { '7': '主力号' } };

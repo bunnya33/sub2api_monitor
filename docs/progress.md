@@ -11,13 +11,14 @@
 - 字号和粗细只作用于浮球及设置中的预览，设置页保持固定排版；进度条文字按背景色计算同色系文字并满足至少 4.5:1 对比度，可在「样式」中开启从文字色压暗得到的 0.5 px 描边，默认关闭。
 - 移除固定详情功能和按钮；浮球右键打开菜单时立即关闭额度详情。
 - 进度条内增加 `5h` / `7d` 标记；显示页新增 7 天开关，并根据 sub2api 脱敏账号档位在 Pro、5x/20x 和 Max 等账号上隐藏 5 小时进度，浮球宽度随可见周期变化。
+- 周期标签贴齐进度条左上角；5h 使用 sub2api 的 indigo-100 / indigo-700，7d 使用 emerald-100 / emerald-700 配色，最窄 40 px 进度条仍能完整显示百分比。
 - 进度条已对齐 sub2api `UsageProgressBar.vue`：已用 75%/90%、剩余 50%/20% 分级，默认使用 Tailwind green/amber/red-500；旧版默认配色自动迁移，自定义颜色保留。
 - sub2api 0.2.8 登录、2FA、管理员校验、账号读取、额度刷新及 Windows `safeStorage` 加密会话已实现。
 - `npm run typecheck`、`npm test`、`npm run build` 通过，Vitest 17 项测试通过；独立目录的 Electron Windows 打包成功。
 - Playwright 真实 Electron 窗口验证包括进度条与名称拖动、悬停明细自动收起、透明度滑块连续拖动、字号作用范围、拖动中的吸附预览、贴边与轮播，以及本地模拟服务器的邮箱密码、2FA、管理员和额度流程。
-- `release/period-tags-build/win-unpacked/Sub2API Quota Monitor.exe` 的打包版本也通过同一套窗口与字体验证。
+- `release/corner-tags-build/win-unpacked/Sub2API Quota Monitor.exe` 的打包版本也通过同一套窗口与字体验证。
 
-Electron 报告和截图：`artifacts/electron-smoke/`、`artifacts/electron-period-tags-smoke/`。本机两块屏幕的缩放比例都是 100%，已验证两屏工作区坐标；不同 DPI 的组合、真实服务器及 Windows“更多图标”面板的保留行为仍需实机联调。旧 WPF 的验证记录保留在下文。
+Electron 报告和截图：`artifacts/electron-smoke/`、`artifacts/electron-corner-tags-smoke/`。本机两块屏幕的缩放比例都是 100%，已验证两屏工作区坐标；不同 DPI 的组合、真实服务器及 Windows“更多图标”面板的保留行为仍需实机联调。旧 WPF 的验证记录保留在下文。
 
 ## WPF 基线记录
 

@@ -47,7 +47,9 @@ input, select { color: var(--text); }
 .meter { position: relative; min-width: 0; height: 22px; border-radius: 3px; background: var(--track); overflow: hidden; container-type: inline-size; font-variant-numeric: tabular-nums; line-height: 22px; text-align: center; }
 .meter-value { position: absolute; z-index: 1; inset: 0; font-size: clamp(9px, 20cqw, var(--ui-size)); white-space: nowrap; overflow: hidden; text-overflow: clip; }
 .meter.outlined .meter-value { -webkit-text-stroke: .5px var(--meter-outline); paint-order: stroke fill; }
-.meter-tag { position: absolute; z-index: 3; left: 2px; top: 1px; padding: 0 1px; border-radius: 2px; background: #ffffffdf; color: #45534b; font-size: 8px; font-weight: 600; line-height: 10px; pointer-events: none; }
+.meter-tag { position: absolute; z-index: 3; left: 0; top: 0; padding: 0 3px; border-radius: 3px 0 3px 0; font-size: 8px; font-weight: 600; line-height: 11px; pointer-events: none; }
+.meter-tag.five { background: #e0e7ff; color: #4338ca; }
+.meter-tag.seven { background: #d1fae5; color: #047857; }
 @container (max-width: 52px) { .meter-tagged .meter-value { padding-right: 2px; text-align: right; font-size: 9px; } }
 .meter-fill { position: absolute; inset: 0 auto 0 0; overflow: hidden; min-width: 0; }
 .meter-foreground { z-index: 2; }

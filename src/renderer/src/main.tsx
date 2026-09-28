@@ -66,7 +66,7 @@ function Meter({ quota, settings, label, period }: { quota: QuotaWindow | null; 
     <span className="meter-value" style={{ color: quota && !needsLightInk(fill) ? textColor : undefined }}>{text}</span>
     {quota && <><span className="meter-fill" style={{ width: `${value}%`, backgroundColor: fill }}/>
       <span className="meter-value meter-foreground" style={{ color: textColor, clipPath: `inset(0 ${100 - value}% 0 0)` }}>{text}</span></>}
-    {period && <span className="meter-tag" aria-hidden="true">{period === 'five' ? '5h' : '7d'}</span>}
+    {period && <span className={`meter-tag ${period}`} aria-hidden="true">{period === 'five' ? '5h' : '7d'}</span>}
   </div>;
 }
 function useSnapshot() {

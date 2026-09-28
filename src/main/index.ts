@@ -148,9 +148,9 @@ function hideDetail(): void {
 function hover(surface: 'floating' | 'detail', inside: boolean): void {
   if (surface === 'floating') overFloating = inside; else overDetail = inside;
   if (leaveTimer) clearTimeout(leaveTimer);
-  if (surface === 'floating' && inside && !dragging) {
+  if (surface === 'floating') {
     if (hoverTimer) clearTimeout(hoverTimer);
-    hoverTimer = setTimeout(showDetail, 220);
+    hoverTimer = inside && !dragging ? setTimeout(showDetail, 220) : null;
   }
   if (!overFloating && !overDetail && !pinned) leaveTimer = setTimeout(() => {
     if (!overFloating && !overDetail) hideDetail();

@@ -1,0 +1,14 @@
+node_modules/
+**/bin/
+**/obj/
+.vs/
+*.user
+TestResults/
+dist/
+release/
+coverage/
+artifacts/
+.data/
+*.log
+.env*
+!.env.example

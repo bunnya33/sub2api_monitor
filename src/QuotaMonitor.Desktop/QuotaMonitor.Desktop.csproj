@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <!-- WPF owns process DPI through the manifest; WinForms is used only for the tray and color dialog. -->
+    <NoWarn>$(NoWarn);WFO0003</NoWarn>
+    <PlatformTarget>x64</PlatformTarget>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AssemblyName>Sub2APIQuotaMonitor</AssemblyName>
+    <Version>0.1.0</Version>
+    <Authors>Quota Monitor</Authors>
+    <Description>Windows desktop quota monitor for sub2api</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../QuotaMonitor.Core/QuotaMonitor.Core.csproj" />
+  </ItemGroup>
+</Project>

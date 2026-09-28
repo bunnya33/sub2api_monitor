@@ -1,0 +1,15 @@
+appId: com.sub2api.quota-monitor
+productName: Sub2API Quota Monitor
+electronDist: node_modules/electron/dist
+directories:
+  output: release
+files:
+  - out/**/*
+  - assets/**/*
+  - package.json
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: assets/app.ico
+asar: true

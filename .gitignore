@@ -1,4 +1,7 @@
 node_modules/
+out/
+assets/app.png
+assets/app.ico
 **/bin/
 **/obj/
 .vs/

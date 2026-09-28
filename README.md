@@ -1,41 +1,48 @@
 # Sub2API Quota Monitor
 
-C# / .NET 10 / WPF 的 Windows 桌面客户端。显示 Claude、OpenAI 等上游账号的 5 小时和 7 天额度，支持托盘、置顶浮窗、四边吸附、账号轮播与悬停明细。接口目标版本：**sub2api 0.2.8**。
+Windows 桌面浮球，查看 sub2api 0.2.8 接入的 Claude、OpenAI 等上游账号的 5 小时与 7 天额度。当前实现：**Electron + React + TypeScript**。
+
+## 使用
+
+运行 [Sub2API Quota Monitor.exe](release/win-unpacked/Sub2API%20Quota%20Monitor.exe)，系统托盘右键打开自绘菜单。浮球右键也可打开同一菜单并进入设置。首次启动显示明确标记的演示账号；在「连接」页填写服务器地址、管理员邮箱和密码，若服务器要求双重验证，再输入 6 位验证码。到「账号」页选择账号并填写浮球别名。
+
+整个浮球区域都可拖动，包括账号名和进度条。拖到当前显示器工作区边缘会收成摘要并轮播账号；悬停查看全部账号和刷新时间。失焦时默认 65% 不透明度，悬停、拖动或查看明细时恢复清晰。自绘设置页包括名称/进度条/贴边宽度、刷新间隔、状态色预览、字号、粗细和 TTF 字体导入。
+
+密码不落盘。记住登录使用 Electron `safeStorage` 在 Windows 当前用户下加密刷新令牌；访问令牌只保留在主进程内存。数据缺失显示 `--`，刷新失败保留成功快照与原时间。
 
 ## 开发
 
-需要 Windows 10/11 x64 和 .NET 10 SDK。直接打开 `QuotaMonitor.sln`，或运行：
+需要 Windows 10/11 x64、Node.js 22.12+ 和 npm：
 
 ```powershell
-dotnet build QuotaMonitor.sln -c Release
-dotnet test QuotaMonitor.sln -c Release
-dotnet run --project src/QuotaMonitor.Desktop
+npm ci
+npm run icons
+npm run dev
 ```
 
-设置从系统托盘图标的右键菜单打开。首次启动打开连接页，填入自己的 sub2api 地址与管理员邮箱、密码。开启双重验证时再输入 6 位验证码，登录后在「账号」页选择监控对象。密码只用于本次登录。未连接服务器时可开启演示模式，示例账号带有「示例」标记。
-
-浮球默认失焦不透明度 65%，悬停、拖动和查看明细时恢复至 100%。设置可修改透明度或关闭淡化。浮球和明细不主动抢占当前应用的输入焦点。
-
-原生窗口自动验证使用隔离配置，期间会短暂移动鼠标并恢复原位。报告与截图保存在 `artifacts/wpf-smoke/`：
+`npm run dev` 启动 Vite 和 Electron 桌面窗口。构建、测试和打包：
 
 ```powershell
-dotnet run --project src/QuotaMonitor.Desktop -c Release -- --smoke-test
-
-# 自包含版本，目标电脑无需安装 .NET。
-powershell -File scripts/publish.ps1
-
-# 较小版本，目标电脑需要 .NET 10 Desktop Runtime。
-powershell -File scripts/publish.ps1 -FrameworkDependent
+npm run typecheck
+npm test
+npm run build
+npm run test:desktop
+npm run pack
 ```
 
-可执行文件为 `release/win-x64/Sub2APIQuotaMonitor.exe`。当前交付为直接运行的 x64 应用，尚未制作安装程序、签名、自动升级和开机自启。
+`npm run pack` 输出 `release/win-unpacked/Sub2API Quota Monitor.exe`，运行时须保留同目录其余文件。`npm run dist:win` 构建安装程序。`npm run test:desktop` 使用隔离的临时配置和本地模拟 sub2api 服务，截图及报告写入 `artifacts/electron-smoke/`；不会连接用户服务器。
 
-`src/QuotaMonitor.Core` 负责数据、API、刷新调度和几何规则；`src/QuotaMonitor.Desktop` 负责 WPF 窗口、托盘、透明度、原生吸附及 DPAPI；`tests/QuotaMonitor.Tests` 包含自动化测试。
+## 结构
 
-## 文档
+| 路径 | 内容 |
+| --- | --- |
+| `src/main` | Electron 窗口、托盘、API、会话与本地存储 |
+| `src/renderer` | React 浮球、明细、右键菜单和设置 |
+| `src/shared` | 配置、额度与跨显示器几何规则 |
+| `src/preload` | 受限的渲染进程接口 |
+| `tests/electron-*.test.ts` | 显示规则与 sub2api 0.2.8 测试 |
+| `scripts/desktop-smoke.cjs` | 实际 Electron 窗口与登录流程验证 |
 
-- [产品与技术方案](docs/design.md)
-- [已核对的 sub2api 接口](docs/api-contract.md)
-- [开发进度与验收记录](docs/progress.md)
+原 C# / .NET 10 + WPF 代码仍在 `src/QuotaMonitor.Core`、`src/QuotaMonitor.Desktop` 和 `tests/QuotaMonitor.Tests`，并固定在 Git 标签 `wpf-baseline`。当前主线的构建脚本使用 Electron，WPF 代码可单独用 `dotnet build QuotaMonitor.sln -c Release` 编译。
 
-配置与 Windows DPAPI 加密的刷新会话保存在 `%LOCALAPPDATA%/Sub2APIQuotaMonitor/`。可用 `QUOTA_DATA_DIR` 指定独立配置目录，`QUOTA_SMOKE_DIR` 指定验证报告目录。额度接口不存在的窗口显示 `--`，失败时保留原成功数据和时间。服务器地址与账号信息不写入 Git。
+文档：[当前方案](docs/electron-design.md) · [sub2api 接口](docs/api-contract.md) · [验证记录](docs/progress.md) · [WPF 历史方案](docs/design.md)。

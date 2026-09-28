@@ -1,5 +1,7 @@
 # Sub2API 桌面额度监控方案
 
+> 历史方案：本文件记录保留的 WPF 实现，Git 标签为 `wpf-baseline`。当前 Electron 实现见 [electron-design.md](electron-design.md)。
+
 确认日期：2026-09-28。目标平台：Windows 10/11 x64。首版名称：Sub2API Quota Monitor。技术方案：**C# / .NET 10 + WPF**，接口目标：**sub2api 0.2.8**。
 
 ## 1. 目标与范围

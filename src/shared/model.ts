@@ -17,8 +17,8 @@ export type Settings = z.infer<typeof settingsSchema>;
 export const defaults: Settings = {
   metric: 'used', showFive: true, autoCollapse: true, summary: 'worst', barWidth: 68,
   nameWidth: 62, topWidth: 178, sideWidth: 64, autoRefresh: true, refreshSeconds: 60, rotateSeconds: 4,
-  fadeInactive: true, inactiveOpacity: 65, normalColor: '#83cbaa', warningColor: '#ffa600',
-  criticalColor: '#ed9c98', fontSize: 12, fontBold: false, fontName: '', rememberSession: true,
+  fadeInactive: true, inactiveOpacity: 65, normalColor: '#22c55e', warningColor: '#f59e0b',
+  criticalColor: '#ef4444', fontSize: 12, fontBold: false, fontName: '', rememberSession: true,
   selectedIds: [1, 2], aliases: {}, demo: true
 };
 export type Edge = 'left' | 'right' | 'top' | 'bottom' | null;
@@ -65,11 +65,23 @@ export function shortName(account: Account, settings: Settings, index: number): 
   const custom = settings.aliases[String(account.id)]?.trim();
   return custom || (account.name.length <= 3 ? account.name : `${account.platform === 'anthropic' ? 'C' : account.platform === 'openai' ? 'O' : 'A'}${index + 1}`);
 }
-export function severity(used: number): 'normal' | 'warning' | 'critical' {
-  return used >= 80 ? 'critical' : used > 50 ? 'warning' : 'normal';
+export function migrateLegacyPalette(settings: Settings): Settings {
+  return {
+    ...settings,
+    normalColor: settings.normalColor === '#83cbaa' ? defaults.normalColor : settings.normalColor,
+    warningColor: settings.warningColor === '#ffa600' ? defaults.warningColor : settings.warningColor,
+    criticalColor: settings.criticalColor === '#ed9c98' ? defaults.criticalColor : settings.criticalColor
+  };
+}
+export function severity(used: number, settings: Settings): 'normal' | 'warning' | 'critical' {
+  if (settings.metric === 'remaining') {
+    const remaining = metric(used, settings);
+    return remaining <= 20 ? 'critical' : remaining <= 50 ? 'warning' : 'normal';
+  }
+  return used >= 90 ? 'critical' : used >= 75 ? 'warning' : 'normal';
 }
 export function color(used: number, settings: Settings): string {
-  return settings[`${severity(used)}Color`];
+  return settings[`${severity(used, settings)}Color`];
 }
 export function metric(used: number, settings: Settings): number {
   return settings.metric === 'used' ? used : Math.max(0, 100 - used);

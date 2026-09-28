@@ -1,7 +1,7 @@
 import { app, safeStorage } from 'electron';
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { defaults, settingsSchema, type Edge, type Settings } from '../shared/model';
+import { defaults, migrateLegacyPalette, settingsSchema, type Edge, type Settings } from '../shared/model';
 import type { SavedSession, SessionVault } from './api';
 
 export interface Configuration { settings: Settings; server: string; email: string; position: { x: number; y: number; edge: Edge } | null }
@@ -13,7 +13,8 @@ export class Store implements SessionVault {
     if (!existsSync(this.configPath)) return { settings: defaults, server: '', email: '', position: null };
     try {
       const raw = JSON.parse(readFileSync(this.configPath, 'utf8'));
-      const settings = settingsSchema.parse({ ...defaults, ...raw.settings });
+      const parsed = settingsSchema.parse({ ...defaults, ...raw.settings });
+      const settings = raw.paletteVersion === 2 ? parsed : migrateLegacyPalette(parsed);
       const point = raw.position;
       const position = point && Number.isFinite(point.x) && Number.isFinite(point.y) && [null, 'left', 'right', 'top', 'bottom'].includes(point.edge)
         ? { x: point.x, y: point.y, edge: point.edge as Edge } : null;
@@ -24,7 +25,7 @@ export class Store implements SessionVault {
   }
   saveConfig(value: Configuration): void {
     const temporary = this.configPath + '.tmp';
-    writeFileSync(temporary, JSON.stringify(value, null, 2));
+    writeFileSync(temporary, JSON.stringify({ ...value, paletteVersion: 2 }, null, 2));
     renameSync(temporary, this.configPath);
   }
   save(value: SavedSession): void {

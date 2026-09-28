@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { alias, color, defaults, ink, percent, shortName, summaryPeriods, type Quota } from '../src/shared/model';
+import { alias, color, defaults, ink, migrateLegacyPalette, percent, severity, shortName, summaryPeriods, type Quota } from '../src/shared/model';
 import { clampRect, detailRect, size, snapEdge } from '../src/shared/geometry';
 import { mapUsage, normalizeServer } from '../src/main/api';
 
@@ -19,12 +19,23 @@ describe('compact quota display', () => {
     expect(shortName(account, settings, 0)).toBe('主力号');
     expect(account.name).toBe('Claude-Production');
   });
-  it('keeps severity based on used quota in remaining mode', () => {
+  it('uses remaining capacity thresholds when the display shows remaining quota', () => {
     const settings = { ...defaults, metric: 'remaining' as const };
     expect(percent(quota.seven, settings)).toBe('16%');
     expect(color(quota.seven!.used, settings)).toBe(settings.criticalColor);
     expect(summaryPeriods(quota, settings)).toEqual(['seven']);
-    expect(ink('#ffa600')).toBe('#000000');
+    expect(ink(defaults.warningColor)).toBe('#000000');
+  });
+  it('matches sub2api progress colors at both sets of boundaries', () => {
+    expect([defaults.normalColor, defaults.warningColor, defaults.criticalColor]).toEqual(['#22c55e', '#f59e0b', '#ef4444']);
+    expect([74, 75, 89, 90].map(used => severity(used, defaults))).toEqual(['normal', 'warning', 'warning', 'critical']);
+    const remaining = { ...defaults, metric: 'remaining' as const };
+    expect([49, 50, 79, 80].map(used => severity(used, remaining))).toEqual(['normal', 'warning', 'warning', 'critical']);
+  });
+  it('migrates prior default colors while preserving custom choices', () => {
+    const old = { ...defaults, normalColor: '#83cbaa', warningColor: '#ffa600', criticalColor: '#ed9c98' };
+    expect(migrateLegacyPalette(old)).toEqual(defaults);
+    expect(migrateLegacyPalette({ ...old, warningColor: '#123456' }).warningColor).toBe('#123456');
   });
   it('does not turn missing upstream data into zero', () => {
     const mapped = mapUsage(account, { five_hour: { utilization: 108 }, seven_day: null });

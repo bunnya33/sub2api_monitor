@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Check, Eye, EyeOff, LogOut, Pin, RefreshCw, Settings2, Upload, X } from 'lucide-react';
-import { alias, color, defaults, ink, metric, percent, shortName, summaryPeriods,
+import { alias, color, defaults, ink, metric, migrateLegacyPalette, percent, shortName, summaryPeriods,
   type DesktopAPI, type Period, type Quota, type QuotaWindow, type Settings, type Snapshot } from '../../shared/model';
 import { size } from '../../shared/geometry';
 import './style.css';
@@ -19,7 +19,14 @@ function browserPreview(): DesktopAPI {
     { id: 2, name: '示例 O2', platform: 'openai', type: 'oauth', status: 'active', five: { used: 19, resetsAt: now + 14700000 }, seven: { used: 84, resetsAt: now + 129600000 } }
   ].map(value => ({ ...value, source: 'demo', updatedAt: now, fetchedAt: now, error: null }));
   let settings: Settings;
-  try { settings = { ...defaults, ...JSON.parse(localStorage.getItem('quota-preview-settings') || '{}') }; }
+  try {
+    settings = { ...defaults, ...JSON.parse(localStorage.getItem('quota-preview-settings') || '{}') };
+    if (!localStorage.getItem('quota-preview-palette-v2')) {
+      settings = migrateLegacyPalette(settings);
+      localStorage.setItem('quota-preview-settings', JSON.stringify(settings));
+      localStorage.setItem('quota-preview-palette-v2', '1');
+    }
+  }
   catch { settings = defaults; }
   let state: Snapshot = { ...demoState, settings, available: quotas, quotas: quotas.filter(item => settings.selectedIds.includes(item.id)), lastRefresh: now };
   const listeners = new Set<(value: Snapshot) => void>();
@@ -173,6 +180,9 @@ function Settings({ state }: { state: Snapshot }) {
     if (!result.ok) setMessage(result.error);
   }
   const tabs: [Tab, string][] = [['display', '显示'], ['refresh', '刷新'], ['style', '样式'], ['connection', '连接'], ['accounts', '账号']];
+  const paletteSamples = state.settings.metric === 'used'
+    ? ([['normalColor', '正常 <75%', 50], ['warningColor', '注意 75%–89%', 80], ['criticalColor', '接近耗尽 ≥90%', 95]] as const)
+    : ([['normalColor', '正常 >50%', 25], ['warningColor', '注意 21%–50%', 65], ['criticalColor', '接近耗尽 ≤20%', 85]] as const);
   return <div className="settings shell">
     <header className="settings-head"><span>设置</span><button title="关闭设置" aria-label="关闭设置" onClick={() => window.desktop.closeSettings()}><X size={16}/></button></header>
     <nav className="tabs" role="tablist">{tabs.map(([id, name]) => <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>{name}</button>)}</nav>
@@ -200,7 +210,7 @@ function Settings({ state }: { state: Snapshot }) {
       </>}
       {tab === 'style' && <>
         <div className="style-group-label">进度状态色</div>
-        {([['normalColor', '正常 ≤50%', 25], ['warningColor', '注意 51%–79%', 65], ['criticalColor', '接近耗尽 ≥80%', 90]] as const).map(([key, name, sample]) => <div className="color-row" key={key}>
+        {paletteSamples.map(([key, name, sample]) => <div className="color-row" key={key}>
           <span>{name}</span><input type="color" aria-label={name + '颜色'} value={state.settings[key]} onChange={event => void update({ [key]: event.target.value })}/>
           <code>{state.settings[key]}</code><div className="preview"><Meter quota={{ used: sample, resetsAt: null }} settings={state.settings} label={name + '预览'}/></div>
         </div>)}

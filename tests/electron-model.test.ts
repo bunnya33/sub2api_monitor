@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { alias, color, defaults, ink, migrateLegacyPalette, percent, severity, shortName, summaryPeriods, type Quota } from '../src/shared/model';
+import { alias, color, defaults, ink, migrateLegacyPalette, outlineInk, percent, severity, shortName, summaryPeriods, type Quota } from '../src/shared/model';
 import { clampRect, detailRect, size, snapEdge } from '../src/shared/geometry';
 import { mapUsage, normalizeServer } from '../src/main/api';
 
@@ -26,6 +26,7 @@ describe('compact quota display', () => {
     expect(summaryPeriods(quota, settings)).toEqual(['seven']);
   });
   it('derives readable text from each progress color', () => {
+    expect(defaults.textOutline).toBe(false);
     const luminance = (hex: string) => {
       const rgb = [1, 3, 5].map(index => parseInt(hex.slice(index, index + 2), 16) / 255)
         .map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4);
@@ -36,6 +37,7 @@ describe('compact quota display', () => {
       const darker = Math.min(luminance(background), luminance(foreground));
       expect((brighter + .05) / (darker + .05)).toBeGreaterThanOrEqual(4.5);
       expect(foreground).not.toMatch(/^#(?:000000|ffffff)$/);
+      expect(luminance(outlineInk(foreground))).toBeLessThan(luminance(foreground));
     }
   });
   it('matches sub2api progress colors at both sets of boundaries', () => {

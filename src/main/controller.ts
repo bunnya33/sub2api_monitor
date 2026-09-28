@@ -18,7 +18,7 @@ export class Controller extends EventEmitter {
   private timer: NodeJS.Timeout;
   constructor(settings: Settings, private vault: SessionVault, private save: () => void, private fetcher?: Fetcher, server = '', email = '') {
     super();
-    this.state = { settings, connection: { status: settings.demo ? 'demo' : 'disconnected', server, email, message: settings.demo ? '演示数据' : '未登录' }, available: [], quotas: [], busy: false, lastRefresh: null, nextRefresh: null, error: null, edge: null, collapsed: false, rotatingIndex: 0, visible: true, detailPinned: false };
+    this.state = { settings, connection: { status: settings.demo ? 'demo' : 'disconnected', server, email, message: settings.demo ? '演示数据' : '未登录' }, available: [], quotas: [], busy: false, lastRefresh: null, nextRefresh: null, error: null, edge: null, collapsed: false, rotatingIndex: 0, visible: true };
     if (settings.demo) this.enableDemo();
     this.timer = setInterval(() => { if (this.state.nextRefresh && Date.now() >= this.state.nextRefresh && !this.state.busy) void this.refresh().catch(() => {}); }, 500);
   }

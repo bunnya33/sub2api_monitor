@@ -18,7 +18,7 @@ if (!single) app.quit();
 let store: Store, config: Configuration, controller: Controller, floating: BrowserWindow;
 let detail: BrowserWindow | null = null, settings: BrowserWindow | null = null, menu: BrowserWindow | null = null;
 let snapPreview: BrowserWindow | null = null, tray: Tray;
-let edge: Edge = null, rotatingIndex = 0, visible = true, overFloating = false, overDetail = false, pinned = false;
+let edge: Edge = null, rotatingIndex = 0, visible = true, overFloating = false, overDetail = false;
 let snapPreviewEdge: Edge = null, menuFromTray = false, menuLeaveTimer: NodeJS.Timeout | null = null;
 let dragging = false, dragTimer: NodeJS.Timeout | null = null, leaveTimer: NodeJS.Timeout | null = null, hoverTimer: NodeJS.Timeout | null = null;
 let dragOrigin: { native: Electron.Point; bounds: Electron.Rectangle; offsetX: number; offsetY: number; pointerX: number; pointerY: number } | null = null;
@@ -55,7 +55,6 @@ function publish(): void {
   controller.state.collapsed = !!(edge && controller.state.settings.autoCollapse);
   controller.state.rotatingIndex = rotatingIndex;
   controller.state.visible = visible;
-  controller.state.detailPinned = pinned;
   for (const window of [floating, detail, settings, menu]) if (window && !window.isDestroyed()) window.webContents.send('state', controller.state);
   if (snapPreview && !snapPreview.isDestroyed()) snapPreview.webContents.send('state', previewState());
   applyOpacity();
@@ -146,7 +145,7 @@ function beginDrag(pointerX: number, pointerY: number): void {
 }
 function targetOpacity(): number {
   const value = controller.state.settings;
-  return !value.fadeInactive || overFloating || overDetail || pinned || dragging || floating.isFocused() ? 1 : value.inactiveOpacity / 100;
+  return !value.fadeInactive || overFloating || overDetail || dragging || floating.isFocused() ? 1 : value.inactiveOpacity / 100;
 }
 function applyOpacity(): void {
   if (!floating || floating.isDestroyed()) return;
@@ -173,7 +172,6 @@ function showDetail(): void {
   publish();
 }
 function hideDetail(): void {
-  if (pinned) return;
   detail?.hide(); overDetail = false;
   if (hoverTimer) clearTimeout(hoverTimer);
   nextRotation = Date.now() + controller.state.settings.rotateSeconds * 1000;
@@ -186,7 +184,7 @@ function hover(surface: 'floating' | 'detail', inside: boolean): void {
     if (hoverTimer) clearTimeout(hoverTimer);
     hoverTimer = inside && !dragging ? setTimeout(showDetail, 220) : null;
   }
-  if (!overFloating && !overDetail && !pinned) leaveTimer = setTimeout(() => {
+  if (!overFloating && !overDetail) leaveTimer = setTimeout(() => {
     if (!overFloating && !overDetail) hideDetail();
   }, 300);
   nextRotation = Date.now() + controller.state.settings.rotateSeconds * 1000;
@@ -228,7 +226,7 @@ function menuAction(action: 'settings' | 'refresh' | 'visibility' | 'quit'): voi
   closeMenu(true);
   if (action === 'settings') openSettings();
   if (action === 'refresh') void controller.refresh();
-  if (action === 'visibility') { visible = !visible; if (visible) floating.showInactive(); else { pinned = false; hideDetail(); floating.hide(); } publish(); }
+  if (action === 'visibility') { visible = !visible; if (visible) floating.showInactive(); else { hideDetail(); floating.hide(); } publish(); }
   if (action === 'quit') app.quit();
 }
 function setupIpc(): void {
@@ -286,9 +284,11 @@ function setupIpc(): void {
   ipcMain.on('hover', (event, surface: 'floating' | 'detail', inside: boolean) => {
     if (senderView(event) === surface) hover(surface, inside);
   });
-  ipcMain.on('detail:pin', event => { if (senderView(event) === 'detail' || senderView(event) === 'floating') { pinned = !pinned; if (!pinned && !overFloating && !overDetail) hideDetail(); publish(); } });
-  ipcMain.on('detail:close', event => { if (senderView(event) === 'detail') { pinned = false; hideDetail(); } });
-  ipcMain.on('context-menu', (event, x: number, y: number) => { if (senderView(event) === 'floating') openMenu(x, y); });
+  ipcMain.on('detail:close', event => { if (senderView(event) === 'detail') hideDetail(); });
+  ipcMain.on('context-menu', (event, x: number, y: number) => {
+    if (senderView(event) !== 'floating') return;
+    overFloating = false; hideDetail(); openMenu(x, y);
+  });
   ipcMain.on('menu:action', (event, action: 'settings' | 'refresh' | 'visibility' | 'quit') => { if (senderView(event) === 'menu') menuAction(action); });
   ipcMain.on('menu:hover', (event, inside: boolean) => {
     if (senderView(event) !== 'menu' || !menuFromTray) return;
@@ -327,7 +327,7 @@ app.whenReady().then(() => {
   screen.on('display-removed', () => resizeFloating());
   screen.on('display-added', () => resizeFloating());
   rotationTimer = setInterval(() => {
-    if (!edge || !controller.state.settings.autoCollapse || dragging || overFloating || overDetail || pinned || !floating.isVisible()) return;
+    if (!edge || !controller.state.settings.autoCollapse || dragging || overFloating || overDetail || !floating.isVisible()) return;
     if (Date.now() < nextRotation) return;
     nextRotation = Date.now() + controller.state.settings.rotateSeconds * 1000;
     if (controller.state.quotas.length > 1) { rotatingIndex = (rotatingIndex + 1) % controller.state.quotas.length; resizeFloating(); }

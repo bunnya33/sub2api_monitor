@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Check, Eye, EyeOff, LogOut, Pin, RefreshCw, Settings2, Upload, X } from 'lucide-react';
-import { alias, color, defaults, ink, metric, migrateLegacyPalette, needsLightInk, percent, shortName, summaryPeriods,
+import { Check, Eye, EyeOff, LogOut, RefreshCw, Settings2, Upload, X } from 'lucide-react';
+import { alias, color, defaults, ink, metric, migrateLegacyPalette, needsLightInk, outlineInk, percent, shortName, summaryPeriods,
   type DesktopAPI, type Period, type Quota, type QuotaWindow, type Settings, type Snapshot } from '../../shared/model';
 import { size } from '../../shared/geometry';
 import './style.css';
@@ -11,7 +11,7 @@ const preview = !window.desktop;
 if (preview) document.body.classList.add('browser-preview');
 const demoState: Snapshot = { settings: defaults, connection: { status: 'demo', server: '', email: '', message: '演示数据' },
   available: [], quotas: [], busy: false, lastRefresh: null, nextRefresh: null, error: null,
-  edge: null, collapsed: false, rotatingIndex: 0, visible: true, detailPinned: false };
+  edge: null, collapsed: false, rotatingIndex: 0, visible: true };
 function browserPreview(): DesktopAPI {
   const now = Date.now();
   const quotas: Quota[] = [
@@ -39,7 +39,7 @@ function browserPreview(): DesktopAPI {
     login: async () => ({ ok: false, error: '请在桌面客户端登录服务器' }), verify: async () => ({ ok: false, error: '请在桌面客户端验证' }),
     logout: async () => ({ ok: true, value: undefined }), refresh: async () => { state = { ...state, lastRefresh: Date.now() }; publish(); return { ok: true, value: undefined }; },
     importFont: async () => ({ ok: false, error: '请在桌面客户端导入字体' }), removeFont: async () => ({ ok: true, value: undefined }),
-    drag: () => {}, dragMove: () => {}, hover: () => {}, pinDetail: () => {}, closeDetail: () => {},
+    drag: () => {}, dragMove: () => {}, hover: () => {}, closeDetail: () => {},
     openContextMenu: () => { location.search = '?view=menu'; },
     menuAction: action => { if (action === 'settings') location.search = '?view=settings';
       if (action === 'refresh') { state = { ...state, lastRefresh: Date.now() }; publish(); } },
@@ -60,7 +60,8 @@ function Meter({ quota, settings, label }: { quota: QuotaWindow | null; settings
   const fill = quota ? color(quota.used, settings) : '#aeb8b3';
   const textColor = quota ? ink(fill) : undefined;
   const text = percent(quota, settings);
-  return <div className="meter" role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100}
+  return <div className={`meter ${settings.textOutline ? 'outlined' : ''}`} style={{ '--meter-outline': settings.textOutline && textColor ? outlineInk(textColor) : undefined } as React.CSSProperties}
+    role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100}
     aria-valuenow={quota ? value : undefined} aria-valuetext={quota ? text : '暂无数据'} title={`${label} · ${text}`}>
     <span className="meter-value" style={{ color: quota && !needsLightInk(fill) ? textColor : undefined }}>{text}</span>
     {quota && <><span className="meter-fill" style={{ width: `${value}%`, backgroundColor: fill }}/>
@@ -130,8 +131,6 @@ function Detail({ state }: { state: Snapshot }) {
   return <div className="detail shell" onPointerEnter={() => window.desktop.hover('detail', true)} onPointerLeave={() => window.desktop.hover('detail', false)}>
     <header className="detail-head"><strong>额度明细</strong><div className="icon-actions">
       <button title="刷新额度" aria-label="刷新额度" onClick={() => void window.desktop.refresh()} disabled={state.busy}><RefreshCw size={15}/></button>
-      <button title={state.detailPinned ? '取消固定' : '固定明细'} aria-label={state.detailPinned ? '取消固定' : '固定明细'} aria-pressed={state.detailPinned}
-        className={state.detailPinned ? 'active' : ''} onClick={() => window.desktop.pinDetail()}><Pin size={15}/></button>
       <button title="关闭明细" aria-label="关闭明细" onClick={() => window.desktop.closeDetail()}><X size={15}/></button>
     </div></header>
     <main className="detail-list">{state.quotas.length ? state.quotas.map(account => <section className="detail-account" key={account.id}>
@@ -227,6 +226,7 @@ function Settings({ state }: { state: Snapshot }) {
         <div className="style-group-label font-label">文字</div>
         {number('界面字号', 'fontSize', 10, 20, 'px')}
         {checkbox('文字加粗', 'fontBold')}
+        {checkbox('进度条文字描边', 'textOutline')}
         <div className="setting-row"><span>自定义 TTF 字体</span><div className="font-actions"><button onClick={async () => { const result = await window.desktop.importFont(); if (!result.ok && result.error !== '已取消导入') setMessage(result.error); }} title="导入 TTF 字体"><Upload size={14}/>导入</button>
           <button onClick={async () => { const result = await window.desktop.removeFont(); if (!result.ok) setMessage(result.error); }} title="恢复系统字体" disabled={!state.settings.fontName}><X size={14}/></button></div></div>
         <div className="font-current" title={state.settings.fontName}>{state.settings.fontName || 'Segoe UI / 系统字体'}</div>

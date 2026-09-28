@@ -8,7 +8,7 @@ export const settingsSchema = z.object({
   refreshSeconds: z.number().int().min(5).max(3600), rotateSeconds: z.number().int().min(2).max(60),
   fadeInactive: z.boolean(), inactiveOpacity: z.number().int().min(20).max(100),
   normalColor: z.string().regex(/^#[0-9a-f]{6}$/i), warningColor: z.string().regex(/^#[0-9a-f]{6}$/i),
-  criticalColor: z.string().regex(/^#[0-9a-f]{6}$/i), fontSize: z.number().int().min(10).max(20),
+  criticalColor: z.string().regex(/^#[0-9a-f]{6}$/i), textOutline: z.boolean(), fontSize: z.number().int().min(10).max(20),
   fontBold: z.boolean(), fontName: z.string().max(260), rememberSession: z.boolean(),
   selectedIds: z.array(z.number().int().positive()).max(100), aliases: z.record(z.string(), z.string().max(40)),
   demo: z.boolean()
@@ -18,7 +18,7 @@ export const defaults: Settings = {
   metric: 'used', showFive: true, autoCollapse: true, summary: 'worst', barWidth: 68,
   nameWidth: 62, topWidth: 178, sideWidth: 64, autoRefresh: true, refreshSeconds: 60, rotateSeconds: 4,
   fadeInactive: true, inactiveOpacity: 65, normalColor: '#22c55e', warningColor: '#f59e0b',
-  criticalColor: '#ef4444', fontSize: 12, fontBold: false, fontName: '', rememberSession: true,
+  criticalColor: '#ef4444', textOutline: false, fontSize: 12, fontBold: false, fontName: '', rememberSession: true,
   selectedIds: [1, 2], aliases: {}, demo: true
 };
 export type Edge = 'left' | 'right' | 'top' | 'bottom' | null;
@@ -34,7 +34,7 @@ export interface Connection { status: 'demo' | 'disconnected' | 'authenticating'
 export interface Snapshot {
   settings: Settings; connection: Connection; available: Account[]; quotas: Quota[];
   busy: boolean; lastRefresh: number | null; nextRefresh: number | null; error: string | null;
-  edge: Edge; collapsed: boolean; rotatingIndex: number; visible: boolean; detailPinned: boolean;
+  edge: Edge; collapsed: boolean; rotatingIndex: number; visible: boolean;
 }
 export type Result<T = void> = { ok: true; value: T } | { ok: false; error: string };
 export const loginSchema = z.object({ server: z.string().min(1).max(2048), email: z.email(), password: z.string().min(1).max(4096) });
@@ -52,7 +52,6 @@ export interface DesktopAPI {
   drag(start: boolean, x?: number, y?: number): void;
   dragMove(x: number, y: number): void;
   hover(surface: 'floating' | 'detail', inside: boolean): void;
-  pinDetail(): void;
   closeDetail(): void;
   openContextMenu(x: number, y: number): void;
   menuAction(action: 'settings' | 'refresh' | 'visibility' | 'quit'): void;
@@ -110,6 +109,9 @@ export function ink(hex: string): string {
     if ((contrast >= 4.5) === darken) low = middle; else high = middle;
   }
   return `#${tone(darken ? low : high).map(channel => channel.toString(16).padStart(2, '0')).join('')}`;
+}
+export function outlineInk(textColor: string): string {
+  return `#${rgb(textColor).map(channel => Math.round(channel * .35).toString(16).padStart(2, '0')).join('')}`;
 }
 export function summaryPeriods(account: Quota, settings: Settings): Period[] {
   if (!settings.showFive) return ['seven'];

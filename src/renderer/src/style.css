@@ -46,6 +46,7 @@ input, select { color: var(--text); }
 .floating-empty { display: grid; place-items: center; width: 100%; height: 100%; color: var(--muted); }
 .meter { position: relative; min-width: 0; height: 22px; border-radius: 3px; background: var(--track); overflow: hidden; container-type: inline-size; font-variant-numeric: tabular-nums; line-height: 22px; text-align: center; }
 .meter-value { position: absolute; z-index: 1; inset: 0; font-size: clamp(9px, 20cqw, var(--ui-size)); white-space: nowrap; overflow: hidden; text-overflow: clip; }
+.meter.outlined .meter-value { -webkit-text-stroke: .5px var(--meter-outline); paint-order: stroke fill; }
 .meter-fill { position: absolute; inset: 0 auto 0 0; overflow: hidden; min-width: 0; }
 .meter-foreground { z-index: 2; }
 .dock-content { display: flex; width: 100%; height: 100%; min-width: 0; }
@@ -64,7 +65,6 @@ input, select { color: var(--text); }
 .icon-actions { display: flex; gap: 2px; }
 .icon-actions button, .settings-head button { width: 27px; height: 27px; border: 0; border-radius: 4px; background: transparent; display: grid; place-items: center; padding: 0; }
 .icon-actions button:hover, .settings-head button:hover { background: var(--hover); }
-.icon-actions button.active { background: #dcece4; color: #187552; }
 .detail-list { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 .detail-account { padding: 9px 11px 8px; border-bottom: 1px solid var(--line); }
 .detail-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }

@@ -1,4 +1,4 @@
-import { summaryPeriods, visiblePeriods, type Edge, type Quota, type Rect, type Settings } from './model';
+import { defaults, summaryPeriods, visiblePeriods, type Edge, type Quota, type Rect, type Settings } from './model';
 
 // Electron's screen workArea, cursor point and BrowserWindow bounds share logical DIP coordinates.
 export function size(settings: Settings, accounts: Quota[], edge: Edge, collapsed: boolean, index = 0): { width: number; height: number } {
@@ -30,8 +30,12 @@ export function snapEdge(rect: Rect, work: Rect, distance = 20): Edge {
   candidates.sort((a, b) => a[1] - b[1]);
   return candidates[0][1] <= distance ? candidates[0][0] : null;
 }
-export function detailRect(ball: Rect, work: Rect, count: number): Rect {
-  const width = Math.min(320, work.width - 16), height = Math.min(80 + Math.max(1, count) * 148, work.height - 16);
+export function detailHeight(count: number, settings: Settings): number {
+  const creditRows = Number(settings.showResetCount) + Number(settings.showResetTime);
+  return 64 + Math.max(1, count) * (144 + creditRows * 18);
+}
+export function detailRect(ball: Rect, work: Rect, count: number, settings: Settings = defaults): Rect {
+  const width = Math.min(320, work.width - 16), height = Math.min(detailHeight(count, settings), work.height - 16);
   const options: Rect[] = [
     { x: ball.x + ball.width + 8, y: ball.y, width, height },
     { x: ball.x - width - 8, y: ball.y, width, height },

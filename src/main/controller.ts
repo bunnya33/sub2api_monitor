@@ -4,9 +4,11 @@ import { ApiError, normalizeServer, Sub2ApiClient, type Fetcher, type SessionVau
 
 export function demoQuotas(now = Date.now()): Quota[] {
   return [
-    { id: 1, name: '示例 C1', platform: 'anthropic', type: 'oauth', status: 'active', five: { used: 32, resetsAt: now + 8280000 }, seven: { used: 58, resetsAt: now + 280800000 } },
-    { id: 2, name: '示例 O2', platform: 'openai', type: 'oauth', status: 'active', planType: 'pro_5x', five: { used: 19, resetsAt: now + 14700000 }, seven: { used: 84, resetsAt: now + 129600000 } }
-  ].map(a => ({ ...a, source: 'demo', updatedAt: now, fetchedAt: now, error: null }));
+    { id: 1, name: '示例 C1', platform: 'anthropic', type: 'oauth', status: 'active', planType: 'plus', subscriptionExpiresAt: now + 1209600000, resetCredits: null,
+      five: { used: 32, resetsAt: now + 8280000 }, seven: { used: 58, resetsAt: now + 280800000 } },
+    { id: 2, name: '示例 O2', platform: 'openai', type: 'oauth', status: 'active', planType: 'pro_5x', subscriptionExpiresAt: now + 1814400000,
+      resetCredits: { available: 2, refreshedAt: now }, five: { used: 19, resetsAt: now + 14700000 }, seven: { used: 84, resetsAt: now + 129600000 } }
+  ].map(a => ({ ...a, source: 'demo', updatedAt: now, fetchedAt: now, error: null, resetCreditsError: null }));
 }
 export class Controller extends EventEmitter {
   readonly state: Snapshot;
@@ -59,10 +61,10 @@ export class Controller extends EventEmitter {
   private selected(): Account[] { return this.state.available.filter(a => this.state.settings.selectedIds.includes(a.id)); }
   private fail(error: unknown, auth = false): void {
     const message = error instanceof Error ? error.message : '操作失败'; this.state.error = message;
-    if (auth || (error instanceof ApiError && [401, 403].includes(error.status))) {
+    if (auth || (error instanceof ApiError && error.sessionError)) {
       this.state.connection.status = error instanceof ApiError && error.status === 401 ? 'expired' : 'error';
       this.state.connection.message = message; this.state.nextRefresh = null;
-      if (error instanceof ApiError && [401, 403].includes(error.status)) this.vault.clear();
+      if (error instanceof ApiError && error.sessionError) this.vault.clear();
     }
     this.publish();
   }
@@ -127,11 +129,19 @@ export class Controller extends EventEmitter {
         if (this.state.settings.demo) {
           this.state.quotas = demoQuotas().filter(a => this.state.settings.selectedIds.includes(a.id)); this.state.lastRefresh = Date.now();
         } else if (this.client) {
+          const available = await this.client.listAccounts(this.abort.signal);
+          if (generation !== this.generation || selection !== this.selectionVersion) return;
+          this.state.available = available;
           const selected = this.selected(), result = await this.client.usages(selected, this.abort.signal);
           if (generation !== this.generation || selection !== this.selectionVersion) return;
           delay = result.retryAfterMs;
-          this.state.quotas = selected.map(a => result.usage.get(a.id) ?? { ...(this.state.quotas.find(q => q.id === a.id) ?? emptyQuota(a)), error: result.errors.get(a.id) ?? '刷新失败' });
-          this.state.error = result.errors.size ? `${result.errors.size} 个账号刷新失败` : null;
+          this.state.quotas = selected.map(a => {
+            const previous = this.state.quotas.find(q => q.id === a.id), quota = result.usage.get(a.id);
+            if (!quota) return { ...(previous ?? emptyQuota(a)), ...a, error: result.errors.get(a.id) ?? '刷新失败' };
+            return quota.resetCreditsError ? { ...quota, resetCredits: previous?.resetCredits ?? null } : quota;
+          });
+          const failed = result.errors.size + this.state.quotas.filter(q => q.resetCreditsError && !q.error).length;
+          this.state.error = failed ? `${failed} 个账号部分数据未更新` : null;
           if (result.usage.size) this.state.lastRefresh = Date.now();
         }
       } catch (error) {

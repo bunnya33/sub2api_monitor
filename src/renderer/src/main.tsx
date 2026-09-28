@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { Check, Eye, EyeOff, LogOut, RefreshCw, Settings2, Upload, X } from 'lucide-react';
 import { alias, color, defaults, ink, metric, migrateLegacyPalette, needsLightInk, outlineInk, percent, shortName, summaryPeriods, supportsFive, visiblePeriods,
   type DesktopAPI, type Period, type Quota, type QuotaWindow, type Settings, type Snapshot } from '../../shared/model';
-import { size } from '../../shared/geometry';
+import { detailHeight, size } from '../../shared/geometry';
 import './style.css';
 
 const view = new URLSearchParams(location.search).get('view') || 'floating';
@@ -15,9 +15,11 @@ const demoState: Snapshot = { settings: defaults, connection: { status: 'demo', 
 function browserPreview(): DesktopAPI {
   const now = Date.now();
   const quotas: Quota[] = [
-    { id: 1, name: '示例 C1', platform: 'anthropic', type: 'oauth', status: 'active', five: { used: 32, resetsAt: now + 8280000 }, seven: { used: 58, resetsAt: now + 280800000 } },
-    { id: 2, name: '示例 O2', platform: 'openai', type: 'oauth', status: 'active', planType: 'pro_5x', five: { used: 19, resetsAt: now + 14700000 }, seven: { used: 84, resetsAt: now + 129600000 } }
-  ].map(value => ({ ...value, source: 'demo', updatedAt: now, fetchedAt: now, error: null }));
+    { id: 1, name: '示例 C1', platform: 'anthropic', type: 'oauth', status: 'active', planType: 'plus', subscriptionExpiresAt: now + 1209600000, resetCredits: null,
+      five: { used: 32, resetsAt: now + 8280000 }, seven: { used: 58, resetsAt: now + 280800000 } },
+    { id: 2, name: '示例 O2', platform: 'openai', type: 'oauth', status: 'active', planType: 'pro_5x', subscriptionExpiresAt: now + 1814400000,
+      resetCredits: { available: 2, refreshedAt: now }, five: { used: 19, resetsAt: now + 14700000 }, seven: { used: 84, resetsAt: now + 129600000 } }
+  ].map(value => ({ ...value, source: 'demo', updatedAt: now, fetchedAt: now, error: null, resetCreditsError: null }));
   let settings: Settings;
   try {
     settings = { ...defaults, ...JSON.parse(localStorage.getItem('quota-preview-settings') || '{}') };
@@ -39,7 +41,7 @@ function browserPreview(): DesktopAPI {
     login: async () => ({ ok: false, error: '请在桌面客户端登录服务器' }), verify: async () => ({ ok: false, error: '请在桌面客户端验证' }),
     logout: async () => ({ ok: true, value: undefined }), refresh: async () => { state = { ...state, lastRefresh: Date.now() }; publish(); return { ok: true, value: undefined }; },
     importFont: async () => ({ ok: false, error: '请在桌面客户端导入字体' }), removeFont: async () => ({ ok: true, value: undefined }),
-    drag: () => {}, dragMove: () => {}, hover: () => {}, closeDetail: () => {},
+    drag: () => {}, dragMove: () => {}, hover: () => {},
     openContextMenu: () => { location.search = '?view=menu'; },
     menuAction: action => { if (action === 'settings') location.search = '?view=settings';
       if (action === 'refresh') { state = { ...state, lastRefresh: Date.now() }; publish(); } },
@@ -50,6 +52,11 @@ function browserPreview(): DesktopAPI {
 if (!window.desktop) window.desktop = browserPreview();
 const platform = (value: string) => value === 'anthropic' ? 'Claude' : value === 'openai' ? 'OpenAI' : value;
 const time = (value: number | null) => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '--';
+const subscription = (value?: string) => {
+  if (!value) return '--';
+  const plan = value.trim().toLowerCase().replace(/_/g, ' ');
+  return plan.replace(/\b(plus|pro|max|free|team|business|enterprise|ultra)\b/g, name => name[0].toUpperCase() + name.slice(1));
+};
 const reset = (value: number | null) => {
   if (!value) return '重置时间未知';
   const delta = Math.max(0, value - Date.now()), hours = Math.floor(delta / 3600000), minutes = Math.floor(delta / 60000) % 60;
@@ -130,20 +137,25 @@ function Floating({ state, ghost = false }: { state: Snapshot; ghost?: boolean }
   </div>;
 }
 function Detail({ state }: { state: Snapshot }) {
-  return <div className="detail shell" onPointerEnter={() => window.desktop.hover('detail', true)} onPointerLeave={() => window.desktop.hover('detail', false)}>
+  return <div className="detail shell" style={{ '--detail-height': `${detailHeight(state.quotas.length, state.settings)}px` } as React.CSSProperties}
+    onPointerEnter={() => window.desktop.hover('detail', true)} onPointerLeave={() => window.desktop.hover('detail', false)}>
     <header className="detail-head"><strong>额度明细</strong><div className="icon-actions">
       <button title="刷新额度" aria-label="刷新额度" onClick={() => void window.desktop.refresh()} disabled={state.busy}><RefreshCw size={15}/></button>
-      <button title="关闭明细" aria-label="关闭明细" onClick={() => window.desktop.closeDetail()}><X size={15}/></button>
     </div></header>
     <main className="detail-list">{state.quotas.length ? state.quotas.map(account => <section className="detail-account" key={account.id}>
       <div className="detail-title"><strong title={account.name}>{alias(account, state.settings)}</strong><span>{account.error ? '缓存' : account.status === 'active' ? '可用' : account.status}</span></div>
-      <div className="detail-sub">{platform(account.platform)} · {account.type}{account.planType ? ` · ${account.planType}` : ''} · {account.source === 'passive' ? '被动采样' : account.source === 'active' ? '服务端查询' : account.source === 'demo' ? '演示数据' : '服务端快照'}</div>
+      <div className="detail-sub">{platform(account.platform)} · {account.type} · <span className="subscription-plan">订阅 {subscription(account.planType)}</span></div>
+      <div className="subscription-expiry">订阅到期 {time(account.subscriptionExpiresAt ?? null)}</div>
       <div className={`detail-windows ${supportsFive(account) ? '' : 'single'}`}>{(supportsFive(account) ? ['five', 'seven'] as Period[] : ['seven'] as Period[]).map(period => <div key={period}>
         <div className="window-label">{period === 'five' ? '5 小时' : '7 天'} · {state.settings.metric === 'used' ? '已用' : '剩余'}</div>
         <Meter quota={account[period]} settings={state.settings} period={period} label={`${alias(account, state.settings)} · ${period === 'five' ? '5 小时' : '7 天'}`}/>
         <div className="reset" title={account[period]?.resetsAt ? time(account[period]!.resetsAt) : '未知'}>{reset(account[period]?.resetsAt ?? null)}</div>
       </div>)}</div>
-      <div className="detail-times">源数据 {time(account.updatedAt)}<br/>本次读取 {time(account.fetchedAt)}</div>
+      {(state.settings.showResetCount || state.settings.showResetTime) && <div className="detail-credits">
+        {state.settings.showResetCount && <div className="reset-count" title="当前可用的额度重置次数"><span>重置次数</span><strong>{account.resetCredits ? `${account.resetCredits.available} 次` : '--'}</strong></div>}
+        {state.settings.showResetTime && <div className="reset-refreshed"><span>次数刷新于</span><time>{time(account.resetCredits?.refreshedAt ?? null)}</time></div>}
+        {account.resetCreditsError && <div className="error">重置次数更新失败：{account.resetCreditsError}</div>}
+      </div>}
       {account.error && <div className="error">{account.error}</div>}
     </section>) : <div className="empty-note">{state.connection.message}</div>}</main>
     <footer className="detail-foot"><span>刷新于 {time(state.lastRefresh)}</span><span>{state.busy ? '刷新中' : state.connection.status === 'demo' ? '演示数据' : state.error ? '部分数据未更新' : state.connection.message}</span></footer>
@@ -199,6 +211,8 @@ function Settings({ state }: { state: Snapshot }) {
         {choice('百分比含义', state.settings.metric, [['used', '已用'], ['remaining', '剩余']], 'metric')}
         {checkbox('显示 5 小时额度', 'showFive')}
         {checkbox('显示 7 天额度', 'showSeven')}
+        {checkbox('显示重置次数', 'showResetCount')}
+        {checkbox('显示重置次数刷新时间', 'showResetTime')}
         {checkbox('贴边自动收起', 'autoCollapse')}
         {number('进度条宽度', 'barWidth', 40, 240, 'px')}
         {number('名称宽度', 'nameWidth', 36, 200, 'px')}

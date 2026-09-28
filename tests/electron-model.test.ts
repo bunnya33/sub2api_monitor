@@ -4,7 +4,7 @@ import { clampRect, detailRect, size, snapEdge } from '../src/shared/geometry';
 import { mapUsage, normalizeServer } from '../src/main/api';
 
 const account = { id: 7, name: 'Claude-Production', platform: 'anthropic', type: 'oauth', status: 'active' };
-const quota: Quota = { ...account, five: { used: 32, resetsAt: null }, seven: { used: 84, resetsAt: null }, source: 'passive', updatedAt: null, fetchedAt: null, error: null };
+const quota: Quota = { ...account, five: { used: 32, resetsAt: null }, seven: { used: 84, resetsAt: null }, source: 'passive', updatedAt: null, fetchedAt: null, error: null, resetCredits: null, resetCreditsError: null };
 
 describe('compact quota display', () => {
   it('preserves the preview dimensions and shrinks when five hour is hidden', () => {

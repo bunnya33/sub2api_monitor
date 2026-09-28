@@ -74,7 +74,7 @@ function resizeFloating(position?: { x: number; y: number }): void {
   const proposed = { x: position?.x ?? old.x, y: position?.y ?? old.y, ...target };
   const work = displayFor(proposed).workArea;
   floating.setBounds(clampRect(proposed, work, edge));
-  if (detail?.isVisible()) detail.setBounds(detailRect(floating.getBounds(), displayFor(floating.getBounds()).workArea, accounts.length));
+  if (detail?.isVisible()) detail.setBounds(detailRect(floating.getBounds(), displayFor(floating.getBounds()).workArea, accounts.length, controller.state.settings));
   publish();
 }
 function savePosition(): void {
@@ -165,7 +165,7 @@ function showDetail(): void {
     url(detail, 'detail');
     detail.on('closed', () => { detail = null; overDetail = false; });
   }
-  detail.setBounds(detailRect(floating.getBounds(), displayFor(floating.getBounds()).workArea, controller.state.quotas.length));
+  detail.setBounds(detailRect(floating.getBounds(), displayFor(floating.getBounds()).workArea, controller.state.quotas.length, controller.state.settings));
   if (!detail.isVisible()) detail.showInactive();
   publish();
 }
@@ -282,7 +282,6 @@ function setupIpc(): void {
   ipcMain.on('hover', (event, surface: 'floating' | 'detail', inside: boolean) => {
     if (senderView(event) === surface) hover(surface, inside);
   });
-  ipcMain.on('detail:close', event => { if (senderView(event) === 'detail') hideDetail(); });
   ipcMain.on('context-menu', (event, x: number, y: number) => {
     if (senderView(event) !== 'floating') return;
     overFloating = false; hideDetail(); openMenu(x, y);

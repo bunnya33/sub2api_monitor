@@ -1,7 +1,8 @@
 import { z } from 'zod';
 
 export const settingsSchema = z.object({
-  metric: z.enum(['used', 'remaining']), showFive: z.boolean(), showSeven: z.boolean(), autoCollapse: z.boolean(),
+  metric: z.enum(['used', 'remaining']), showFive: z.boolean(), showSeven: z.boolean(),
+  showResetCount: z.boolean(), showResetTime: z.boolean(), autoCollapse: z.boolean(),
   summary: z.enum(['worst', 'both', 'five', 'seven']), barWidth: z.number().int().min(40).max(240),
   nameWidth: z.number().int().min(36).max(200), topWidth: z.number().int().min(120).max(400),
   sideWidth: z.number().int().min(48).max(240), autoRefresh: z.boolean(),
@@ -15,7 +16,7 @@ export const settingsSchema = z.object({
 });
 export type Settings = z.infer<typeof settingsSchema>;
 export const defaults: Settings = {
-  metric: 'used', showFive: true, showSeven: true, autoCollapse: true, summary: 'worst', barWidth: 68,
+  metric: 'used', showFive: true, showSeven: true, showResetCount: true, showResetTime: true, autoCollapse: true, summary: 'worst', barWidth: 68,
   nameWidth: 62, topWidth: 178, sideWidth: 64, autoRefresh: true, refreshSeconds: 60, rotateSeconds: 4,
   fadeInactive: true, inactiveOpacity: 65, normalColor: '#22c55e', warningColor: '#f59e0b',
   criticalColor: '#ef4444', textOutline: false, fontSize: 12, fontBold: false, fontName: '', rememberSession: true,
@@ -24,11 +25,13 @@ export const defaults: Settings = {
 export type Edge = 'left' | 'right' | 'top' | 'bottom' | null;
 export type Period = 'five' | 'seven';
 export interface Rect { x: number; y: number; width: number; height: number }
-export interface Account { id: number; name: string; platform: string; type: string; status: string; planType?: string }
+export interface Account { id: number; name: string; platform: string; type: string; status: string; planType?: string; subscriptionExpiresAt?: number | null }
 export interface QuotaWindow { used: number; resetsAt: number | null }
+export interface ResetCredits { available: number; refreshedAt: number | null }
 export interface Quota extends Account {
   five: QuotaWindow | null; seven: QuotaWindow | null; source: string;
   updatedAt: number | null; fetchedAt: number | null; error: string | null;
+  resetCredits: ResetCredits | null; resetCreditsError: string | null;
 }
 export interface Connection { status: 'demo' | 'disconnected' | 'authenticating' | 'twoFactor' | 'connected' | 'expired' | 'error'; server: string; email: string; message: string }
 export interface Snapshot {
@@ -52,7 +55,6 @@ export interface DesktopAPI {
   drag(start: boolean, x?: number, y?: number): void;
   dragMove(x: number, y: number): void;
   hover(surface: 'floating' | 'detail', inside: boolean): void;
-  closeDetail(): void;
   openContextMenu(x: number, y: number): void;
   menuAction(action: 'settings' | 'refresh' | 'visibility' | 'quit'): void;
   menuHover(inside: boolean): void;
@@ -132,5 +134,5 @@ export function summaryPeriods(account: Quota, settings: Settings): Period[] {
   return [(account.five?.used ?? -1) >= (account.seven?.used ?? -1) ? 'five' : 'seven'];
 }
 export function emptyQuota(account: Account): Quota {
-  return { ...account, five: null, seven: null, source: 'unknown', updatedAt: null, fetchedAt: null, error: null };
+  return { ...account, five: null, seven: null, source: 'unknown', updatedAt: null, fetchedAt: null, error: null, resetCredits: null, resetCreditsError: null };
 }

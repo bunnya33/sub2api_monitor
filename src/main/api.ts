@@ -1,15 +1,16 @@
 import { z } from 'zod';
-import { emptyQuota, type Account, type LoginInput, type Quota, type QuotaWindow } from '../shared/model';
+import { emptyQuota, type Account, type LoginInput, type Quota, type QuotaWindow, type ResetCredits } from '../shared/model';
 
 const accountSchema = z.object({ id: z.number().int().positive(), name: z.string(), platform: z.string(), type: z.string(), status: z.string().default('active'),
-  credentials: z.record(z.string(), z.unknown()).nullish(), parent_plan_type: z.string().nullish() });
+  credentials: z.record(z.string(), z.unknown()).nullish(), parent_plan_type: z.string().nullish(), parent_subscription_expires_at: z.string().nullish() });
 const tokenSchema = z.object({ access_token: z.string().min(1), refresh_token: z.string().optional(), expires_in: z.number().optional() });
 const userSchema = z.object({ role: z.string(), email: z.string().optional() });
 export interface SavedSession { server: string; email: string; refreshToken: string }
 export interface SessionVault { save(value: SavedSession): void; load(): SavedSession | null; clear(): void }
 export type Fetcher = (url: string, init?: RequestInit) => Promise<Response>;
 export class ApiError extends Error {
-  constructor(message: string, public status = 0, public retryAfterMs = 0) { super(message); }
+  constructor(message: string, public status = 0, public retryAfterMs = 0, public reason = '') { super(message); }
+  get sessionError(): boolean { return [401, 403].includes(this.status) && this.reason !== 'OPENAI_QUOTA_UPSTREAM_ERROR'; }
 }
 export function normalizeServer(value: string): string {
   const url = new URL(value.trim());
@@ -31,6 +32,14 @@ export function mapUsage(account: Account, raw: unknown, now = Date.now()): Quot
     source: value.source === 'passive' ? 'passive' : value.source === 'active' ? 'active' : 'snapshot',
     updatedAt: Number.isFinite(updated) ? updated : null, fetchedAt: now,
     error: typeof value.error === 'string' && value.error ? value.error.slice(0, 300) : null };
+}
+export function mapResetCredits(raw: unknown): ResetCredits | null {
+  const data = z.object({ rate_limit_reset_credits: z.object({ available_count: z.number().int().nonnegative() }).nullish(),
+    fetched_at: z.unknown().optional() }).safeParse(raw);
+  if (!data.success || !data.data.rate_limit_reset_credits) return null;
+  const timestamp = data.data.fetched_at;
+  return { available: data.data.rate_limit_reset_credits.available_count,
+    refreshedAt: typeof timestamp === 'number' && Number.isFinite(timestamp) && timestamp > 0 && timestamp <= 8.64e12 ? timestamp * 1000 : null };
 }
 export class Sub2ApiClient {
   readonly server: string;
@@ -56,12 +65,13 @@ export class Sub2ApiClient {
     }
     const text = await response.text();
     if (text.length > 4 * 1024 * 1024) throw new ApiError('服务器响应过大');
-    let envelope: { code?: number; message?: string; data?: unknown } = {};
+    let envelope: { code?: number; message?: string; reason?: string; data?: unknown } = {};
     try { envelope = JSON.parse(text); } catch { if (response.ok) throw new ApiError('服务器没有返回 JSON，请检查服务器地址'); }
     if (!response.ok || (envelope.code !== undefined && envelope.code !== 0 && envelope.code !== 200)) {
       const retry = response.headers.get('retry-after'), seconds = retry ? Number(retry) : NaN;
       const retryAfter = Number.isFinite(seconds) ? seconds * 1000 : retry ? Math.max(0, Date.parse(retry) - Date.now()) : 0;
-      throw new ApiError(typeof envelope.message === 'string' ? envelope.message.slice(0, 300) : `请求失败 (${response.status})`, response.status, retryAfter);
+      throw new ApiError(typeof envelope.message === 'string' ? envelope.message.slice(0, 300) : `请求失败 (${response.status})`, response.status, retryAfter,
+        typeof envelope.reason === 'string' ? envelope.reason.slice(0, 100) : '');
     }
     return envelope.data ?? envelope;
   }
@@ -113,7 +123,7 @@ export class Sub2ApiClient {
     const attempted = this.accessToken;
     try { return await this.raw(path, undefined, attempted, signal); }
     catch (error) {
-      if (!(error instanceof ApiError) || error.status !== 401 || !this.refreshToken) throw error;
+      if (!(error instanceof ApiError) || error.status !== 401 || !error.sessionError || !this.refreshToken) throw error;
       await this.refreshTokens(attempted, signal); return this.raw(path, undefined, this.accessToken, signal);
     }
   }
@@ -121,8 +131,14 @@ export class Sub2ApiClient {
     const accounts: Account[] = [];
     for (let page = 1; page <= 100; page++) {
       const data = z.object({ items: z.array(accountSchema), total: z.number() }).parse(await this.request(`/admin/accounts?page=${page}&page_size=100&lite=true`, signal));
-      accounts.push(...data.items.map(item => ({ id: item.id, name: item.name, platform: item.platform, type: item.type, status: item.status,
-        planType: typeof item.credentials?.plan_type === 'string' && item.credentials.plan_type.trim() ? item.credentials.plan_type.trim() : item.parent_plan_type || undefined })));
+      accounts.push(...data.items.map(item => {
+        const expires = typeof item.credentials?.subscription_expires_at === 'string' && item.credentials.subscription_expires_at.trim()
+          ? item.credentials.subscription_expires_at : item.parent_subscription_expires_at;
+        const expiryTime = expires ? Date.parse(expires) : NaN;
+        return { id: item.id, name: item.name, platform: item.platform, type: item.type, status: item.status,
+          planType: typeof item.credentials?.plan_type === 'string' && item.credentials.plan_type.trim() ? item.credentials.plan_type.trim() : item.parent_plan_type || undefined,
+          subscriptionExpiresAt: Number.isFinite(expiryTime) ? expiryTime : null };
+      }));
       if (accounts.length >= data.total || data.items.length === 0) return accounts;
     }
     throw new ApiError('账号分页数量超过客户端限制');
@@ -136,10 +152,20 @@ export class Sub2ApiClient {
         const source = account.platform === 'anthropic' && ['oauth', 'setup-token'].includes(account.type) ? 'passive' : 'active';
         const data = await this.request(`/admin/accounts/${account.id}/usage?source=${source}&force=false`, signal);
         const mapped = mapUsage(account, data);
-        if (mapped.error) errors.set(account.id, mapped.error); else usage.set(account.id, mapped);
+        if (mapped.error) { errors.set(account.id, mapped.error); continue; }
+        if (account.platform === 'openai' && account.type === 'oauth') {
+          try { mapped.resetCredits = mapResetCredits(await this.request(`/admin/openai/accounts/${account.id}/quota`, signal)); }
+          catch (error) {
+            if (signal?.aborted) throw error;
+            if (error instanceof ApiError && error.sessionError) throw error;
+            if (error instanceof ApiError && error.status === 429) retryAfterMs = error.retryAfterMs || 30000;
+            mapped.resetCreditsError = error instanceof Error ? error.message : '刷新失败';
+          }
+        }
+        usage.set(account.id, mapped);
       } catch (error) {
         if (signal?.aborted) throw error;
-        if (error instanceof ApiError && [401, 403].includes(error.status)) throw error;
+        if (error instanceof ApiError && error.sessionError) throw error;
         if (error instanceof ApiError && error.status === 429) retryAfterMs = error.retryAfterMs || 30000;
         errors.set(account.id, error instanceof Error ? error.message : '刷新失败');
       }

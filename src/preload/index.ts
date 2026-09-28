@@ -18,7 +18,6 @@ const api: DesktopAPI = {
   drag: (start: boolean, x?: number, y?: number) => ipcRenderer.send('drag', start, x, y),
   dragMove: (x, y) => ipcRenderer.send('drag:move', x, y),
   hover: (surface, inside) => ipcRenderer.send('hover', surface, inside),
-  closeDetail: () => ipcRenderer.send('detail:close'),
   openContextMenu: (x, y) => ipcRenderer.send('context-menu', x, y),
   menuAction: action => ipcRenderer.send('menu:action', action),
   menuHover: inside => ipcRenderer.send('menu:hover', inside),

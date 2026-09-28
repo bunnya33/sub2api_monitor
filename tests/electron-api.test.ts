@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ApiError, Sub2ApiClient, type SavedSession, type SessionVault } from '../src/main/api';
+import { ApiError, mapResetCredits, Sub2ApiClient, type SavedSession, type SessionVault } from '../src/main/api';
 
 class MemoryVault implements SessionVault {
   value: SavedSession | null = null;
@@ -11,21 +11,72 @@ const response = (data: unknown, status = 200, headers?: HeadersInit) =>
   new Response(JSON.stringify({ code: 0, data }), { status, headers });
 
 describe('sub2api 0.2.8 session and usage', () => {
-  it('reads only the account plan from the redacted 0.2.8 list', async () => {
+  it('reads subscription metadata from the redacted 0.2.8 list without copying credentials', async () => {
     const client = new Sub2ApiClient('https://example.invalid', new MemoryVault(), false, async url => {
       const route = new URL(url).pathname;
       if (route.endsWith('/login')) return response({ access_token: 'access' });
       if (route.endsWith('/me')) return response({ role: 'admin' });
       return response({ items: [
-        { id: 1, name: 'Plus', platform: 'openai', type: 'oauth', status: 'active', credentials: { plan_type: 'plus', access_token: 'must-not-copy' } },
-        { id: 2, name: 'Pro', platform: 'openai', type: 'oauth', status: 'active', credentials: { plan_type: 'pro_5x' } },
-        { id: 3, name: 'Shadow', platform: 'openai', type: 'oauth', status: 'active', parent_plan_type: 'max_20x' }
-      ], total: 3 });
+        { id: 1, name: 'Plus', platform: 'openai', type: 'oauth', status: 'active', credentials: { plan_type: 'plus', subscription_expires_at: '2026-10-01T00:00:00Z', expires_at: '2026-09-30T00:00:00Z', access_token: 'must-not-copy' } },
+        { id: 2, name: 'Pro', platform: 'openai', type: 'oauth', status: 'active', credentials: { plan_type: 'pro_5x', expires_at: '2026-09-30T00:00:00Z' } },
+        { id: 3, name: 'Shadow', platform: 'openai', type: 'oauth', status: 'active', parent_plan_type: 'max_20x', parent_subscription_expires_at: '2026-10-02T00:00:00Z' },
+        { id: 4, name: 'Unknown', platform: 'anthropic', type: 'oauth', status: 'active', credentials: { subscription_expires_at: 'invalid' } }
+      ], total: 4 });
     });
     await client.login({ server: 'https://example.invalid', email: 'admin@example.com', password: 'secret' });
     const accounts = await client.listAccounts();
-    expect(accounts.map(item => item.planType)).toEqual(['plus', 'pro_5x', 'max_20x']);
+    expect(accounts.map(item => item.planType)).toEqual(['plus', 'pro_5x', 'max_20x', undefined]);
+    expect(accounts.map(item => item.subscriptionExpiresAt)).toEqual([Date.parse('2026-10-01T00:00:00Z'), null, Date.parse('2026-10-02T00:00:00Z'), null]);
     expect(JSON.stringify(accounts)).not.toContain('must-not-copy');
+    expect(accounts.every(item => !('credentials' in item))).toBe(true);
+  });
+  it('keeps missing reset credits unknown and uses only the server reset query timestamp', () => {
+    expect(mapResetCredits({ fetched_at: 1790676600 })).toBeNull();
+    expect(mapResetCredits({ rate_limit_reset_credits: null, fetched_at: 1790676600 })).toBeNull();
+    expect(mapResetCredits({ rate_limit_reset_credits: { available_count: -1 }, fetched_at: 1790676600 })).toBeNull();
+    expect(mapResetCredits({ rate_limit_reset_credits: { available_count: 0 }, fetched_at: 1790676600 })).toEqual({ available: 0, refreshedAt: 1790676600000 });
+    expect(mapResetCredits({ rate_limit_reset_credits: { available_count: 2 } })).toEqual({ available: 2, refreshedAt: null });
+  });
+  it('queries reset credits only for OpenAI OAuth accounts and preserves quotas when that query is limited', async () => {
+    const paths: string[] = [];
+    const client = new Sub2ApiClient('https://example.invalid', new MemoryVault(), false, async url => {
+      const path = new URL(url).pathname;
+      paths.push(path);
+      if (path.endsWith('/login')) return response({ access_token: 'a' });
+      if (path.endsWith('/me')) return response({ role: 'admin' });
+      if (path === '/api/v1/admin/openai/accounts/2/quota') return response({}, 429, { 'Retry-After': '120' });
+      return response({ five_hour: { utilization: 32 }, seven_day: { utilization: 58 } });
+    });
+    await client.login({ server: 'https://example.invalid', email: 'admin@example.com', password: 'secret' });
+    const result = await client.usages([
+      { id: 1, name: 'API key', platform: 'openai', type: 'apikey', status: 'active' },
+      { id: 2, name: 'OAuth', platform: 'openai', type: 'oauth', status: 'active' },
+      { id: 3, name: 'Claude', platform: 'anthropic', type: 'oauth', status: 'active' }
+    ]);
+    expect(paths.filter(path => path.endsWith('/quota'))).toEqual(['/api/v1/admin/openai/accounts/2/quota']);
+    expect(result.usage.get(2)?.seven?.used).toBe(58);
+    expect(result.usage.get(2)?.resetCreditsError).toContain('429');
+    expect(result.errors.has(3)).toBe(true);
+    expect(paths.some(path => path.includes('/accounts/3/'))).toBe(false);
+    expect(result.retryAfterMs).toBe(120000);
+  });
+  it.each([401, 403])('keeps upstream quota authentication error %i separate from the administrator session', async status => {
+    let refreshes = 0;
+    const vault = new MemoryVault();
+    const client = new Sub2ApiClient('https://example.invalid', vault, true, async url => {
+      const path = new URL(url).pathname;
+      if (path.endsWith('/login')) return response({ access_token: 'access', refresh_token: 'refresh' });
+      if (path.endsWith('/me')) return response({ role: 'admin' });
+      if (path === '/api/v1/auth/refresh') { refreshes++; return response({ access_token: 'renewed' }); }
+      if (path.endsWith('/quota')) return new Response(JSON.stringify({ code: status, message: `upstream returned ${status}`, reason: 'OPENAI_QUOTA_UPSTREAM_ERROR' }), { status });
+      return response({ seven_day: { utilization: 58 } });
+    });
+    await client.login({ server: 'https://example.invalid', email: 'admin@example.com', password: 'secret' });
+    const result = await client.usages([{ id: 1, name: 'OpenAI', platform: 'openai', type: 'oauth', status: 'active' }]);
+    expect(result.usage.get(1)?.seven?.used).toBe(58);
+    expect(result.usage.get(1)?.resetCreditsError).toBe(`upstream returned ${status}`);
+    expect(refreshes).toBe(0);
+    expect(vault.value?.refreshToken).toBe('refresh');
   });
   it('passes the exact 2FA fields and persists only after admin verification', async () => {
     const vault = new MemoryVault();

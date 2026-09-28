@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Check, Eye, EyeOff, LogOut, Pin, RefreshCw, Settings2, Upload, X } from 'lucide-react';
-import { alias, color, defaults, ink, metric, migrateLegacyPalette, percent, shortName, summaryPeriods,
+import { alias, color, defaults, ink, metric, migrateLegacyPalette, needsLightInk, percent, shortName, summaryPeriods,
   type DesktopAPI, type Period, type Quota, type QuotaWindow, type Settings, type Snapshot } from '../../shared/model';
 import { size } from '../../shared/geometry';
 import './style.css';
@@ -43,6 +43,7 @@ function browserPreview(): DesktopAPI {
     openContextMenu: () => { location.search = '?view=menu'; },
     menuAction: action => { if (action === 'settings') location.search = '?view=settings';
       if (action === 'refresh') { state = { ...state, lastRefresh: Date.now() }; publish(); } },
+    menuHover: () => {},
     closeSettings: () => { location.search = '?view=floating'; }
   };
 }
@@ -57,12 +58,13 @@ const reset = (value: number | null) => {
 function Meter({ quota, settings, label }: { quota: QuotaWindow | null; settings: Settings; label: string }) {
   const value = quota ? Math.max(0, Math.min(100, metric(quota.used, settings))) : 0;
   const fill = quota ? color(quota.used, settings) : '#aeb8b3';
+  const textColor = quota ? ink(fill) : undefined;
   const text = percent(quota, settings);
   return <div className="meter" role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100}
     aria-valuenow={quota ? value : undefined} aria-valuetext={quota ? text : '暂无数据'} title={`${label} · ${text}`}>
-    <span className="meter-value">{text}</span>
+    <span className="meter-value" style={{ color: quota && !needsLightInk(fill) ? textColor : undefined }}>{text}</span>
     {quota && <><span className="meter-fill" style={{ width: `${value}%`, backgroundColor: fill }}/>
-      <span className="meter-value meter-foreground" style={{ color: ink(fill), clipPath: `inset(0 ${100 - value}% 0 0)` }}>{text}</span></>}
+      <span className="meter-value meter-foreground" style={{ color: textColor, clipPath: `inset(0 ${100 - value}% 0 0)` }}>{text}</span></>}
   </div>;
 }
 function useSnapshot() {
@@ -75,18 +77,21 @@ function useSnapshot() {
   }, []);
   useEffect(() => {
     const settings = state.settings;
-    document.documentElement.style.setProperty('--ui-size', `${settings.fontSize}px`);
-    document.documentElement.style.setProperty('--ui-weight', settings.fontBold ? '600' : '400');
+    document.documentElement.style.setProperty('--floating-size', `${settings.fontSize}px`);
+    document.documentElement.style.setProperty('--floating-weight', settings.fontBold ? '600' : '400');
+  }, [state.settings.fontSize, state.settings.fontBold]);
+  useEffect(() => {
+    const settings = state.settings;
     if (!settings.fontName) { document.documentElement.style.setProperty('--ui-font', '"Segoe UI", "Microsoft YaHei", sans-serif'); return; }
     let cancelled = false;
     const face = new FontFace('Quota Custom', `url("quota-font://local/custom.ttf?v=${Date.now()}")`);
     face.load().then(loaded => { if (!cancelled) { document.fonts.add(loaded); document.documentElement.style.setProperty('--ui-font', '"Quota Custom", "Segoe UI", sans-serif'); } })
       .catch(() => { if (!cancelled) document.documentElement.style.setProperty('--ui-font', '"Segoe UI", sans-serif'); });
     return () => { cancelled = true; };
-  }, [state.settings]);
+  }, [state.settings.fontName]);
   return state;
 }
-function Floating({ state }: { state: Snapshot }) {
+function Floating({ state, ghost = false }: { state: Snapshot; ghost?: boolean }) {
   const settings = state.settings, active = state.quotas[state.rotatingIndex % Math.max(1, state.quotas.length)];
   const pressed = useRef(false);
   function down(event: React.PointerEvent<HTMLDivElement>) {
@@ -103,10 +108,10 @@ function Floating({ state }: { state: Snapshot }) {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   }
   const collapsed = state.collapsed && !!state.edge;
-  return <div className={`floating ${collapsed ? `docked ${state.edge}` : ''}`} style={{ '--bar-width': `${settings.barWidth}px`,
-    ...(preview ? size(settings, state.quotas, state.edge, collapsed) : {}) } as React.CSSProperties} onPointerDown={down} onPointerMove={event => { if (pressed.current) window.desktop.dragMove(event.screenX, event.screenY); }} onPointerUp={up} onLostPointerCapture={() => { if (pressed.current) { pressed.current = false; window.desktop.drag(false); } }}
-    onPointerEnter={() => window.desktop.hover('floating', true)} onPointerLeave={() => window.desktop.hover('floating', false)}
-    onContextMenu={event => { event.preventDefault(); window.desktop.openContextMenu(event.screenX, event.screenY); }}>
+  return <div className={`floating ${collapsed ? `docked ${state.edge}` : ''} ${ghost ? 'snap-ghost' : ''}`} style={{ '--bar-width': `${settings.barWidth}px`,
+    ...(preview ? size(settings, state.quotas, state.edge, collapsed) : {}) } as React.CSSProperties} onPointerDown={ghost ? undefined : down} onPointerMove={ghost ? undefined : event => { if (pressed.current) window.desktop.dragMove(event.screenX, event.screenY); }} onPointerUp={ghost ? undefined : up} onLostPointerCapture={ghost ? undefined : () => { if (pressed.current) { pressed.current = false; window.desktop.drag(false); } }}
+    onPointerEnter={ghost ? undefined : () => window.desktop.hover('floating', true)} onPointerLeave={ghost ? undefined : () => window.desktop.hover('floating', false)}
+    onContextMenu={ghost ? undefined : event => { event.preventDefault(); window.desktop.openContextMenu(event.screenX, event.screenY); }}>
     {collapsed && active ? <div className={`dock-content ${state.edge === 'left' || state.edge === 'right' ? 'vertical' : 'horizontal'}`}>
       <span className="dock-name" title={alias(active, settings)}>{shortName(active, settings, state.rotatingIndex)}</span>
       <div className="dock-bars">{summaryPeriods(active, settings).map(period => <Meter key={period} quota={active[period]} settings={settings}
@@ -144,7 +149,7 @@ function Detail({ state }: { state: Snapshot }) {
   </div>;
 }
 function Menu({ state }: { state: Snapshot }) {
-  return <div className="menu shell" role="menu">
+  return <div className="menu shell" role="menu" onPointerEnter={() => window.desktop.menuHover(true)} onPointerLeave={() => window.desktop.menuHover(false)}>
     <button role="menuitem" onClick={() => window.desktop.menuAction('refresh')}><RefreshCw size={15}/>刷新额度</button>
     <button role="menuitemcheckbox" aria-checked={state.visible} onClick={() => window.desktop.menuAction('visibility')}>
       {state.visible ? <Eye size={15}/> : <EyeOff size={15} />}{state.visible ? '隐藏浮球' : '显示浮球'}</button>
@@ -157,6 +162,8 @@ function Menu({ state }: { state: Snapshot }) {
 type Tab = 'display' | 'refresh' | 'style' | 'connection' | 'accounts';
 function Settings({ state }: { state: Snapshot }) {
   const [tab, setTab] = useState<Tab>('display');
+  const [opacityDraft, setOpacityDraft] = useState(state.settings.inactiveOpacity);
+  useEffect(() => { setOpacityDraft(state.settings.inactiveOpacity); }, [state.settings.inactiveOpacity]);
   const [server, setServer] = useState(''), [email, setEmail] = useState(''), [password, setPassword] = useState(''), [otp, setOtp] = useState('');
   const [message, setMessage] = useState('');
   useEffect(() => { if (state.connection.server && !server) setServer(state.connection.server); if (state.connection.email && !email) setEmail(state.connection.email); }, [state.connection.server, state.connection.email]);
@@ -197,8 +204,11 @@ function Settings({ state }: { state: Snapshot }) {
         {number('两侧贴边宽度', 'sideWidth', 48, 240, 'px')}
         {choice('贴边摘要', state.settings.summary, [['worst', '最紧张的窗口'], ['both', '5 小时 + 7 天'], ['five', '5 小时'], ['seven', '7 天']], 'summary')}
         {checkbox('失焦时半透明', 'fadeInactive')}
-        <label className="setting-row"><span>失焦不透明度</span><div className="slider-field"><input key={state.settings.inactiveOpacity} type="range" min="20" max="100" defaultValue={state.settings.inactiveOpacity} disabled={!state.settings.fadeInactive}
-          onChange={event => void update({ inactiveOpacity: Number(event.target.value) })}/><b>{state.settings.inactiveOpacity}%</b></div></label>
+        <label className="setting-row"><span>失焦不透明度</span><div className="slider-field"><input type="range" min="20" max="100" value={opacityDraft} disabled={!state.settings.fadeInactive}
+          onChange={event => setOpacityDraft(Number(event.target.value))}
+          onPointerUp={event => { const value = Number(event.currentTarget.value); if (value !== state.settings.inactiveOpacity) void update({ inactiveOpacity: value }); }}
+          onKeyUp={event => { const value = Number(event.currentTarget.value); if (value !== state.settings.inactiveOpacity) void update({ inactiveOpacity: value }); }}
+          onBlur={event => { const value = Number(event.currentTarget.value); if (value !== state.settings.inactiveOpacity) void update({ inactiveOpacity: value }); }}/><b>{opacityDraft}%</b></div></label>
       </>}
       {tab === 'refresh' && <>
         {checkbox('自动刷新', 'autoRefresh')}
@@ -252,7 +262,7 @@ function Settings({ state }: { state: Snapshot }) {
 
 function App() {
   const state = useSnapshot();
-  return view === 'floating' ? <Floating state={state}/> : view === 'detail' ? <Detail state={state}/>
+  return view === 'floating' || view === 'snap-preview' ? <Floating state={state} ghost={view === 'snap-preview'}/> : view === 'detail' ? <Detail state={state}/>
     : view === 'menu' ? <Menu state={state}/> : <Settings state={state}/>;
 }
 createRoot(document.getElementById('root')!).render(<App/>);

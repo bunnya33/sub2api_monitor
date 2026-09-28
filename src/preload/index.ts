@@ -22,6 +22,7 @@ const api: DesktopAPI = {
   closeDetail: () => ipcRenderer.send('detail:close'),
   openContextMenu: (x, y) => ipcRenderer.send('context-menu', x, y),
   menuAction: action => ipcRenderer.send('menu:action', action),
+  menuHover: inside => ipcRenderer.send('menu:hover', inside),
   closeSettings: () => ipcRenderer.send('settings:close')
 };
 contextBridge.exposeInMainWorld('desktop', api);

@@ -56,6 +56,7 @@ export interface DesktopAPI {
   closeDetail(): void;
   openContextMenu(x: number, y: number): void;
   menuAction(action: 'settings' | 'refresh' | 'visibility' | 'quit'): void;
+  menuHover(inside: boolean): void;
   closeSettings(): void;
 }
 export function alias(account: Account, settings: Settings): string {
@@ -89,11 +90,26 @@ export function metric(used: number, settings: Settings): number {
 export function percent(window: QuotaWindow | null, settings: Settings): string {
   return window ? `${Math.round(metric(window.used, settings))}%` : '--';
 }
+function luminance(rgb: number[]): number {
+  const linear = rgb.map(channel => {
+    const value = channel / 255;
+    return value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4;
+  });
+  return .2126 * linear[0] + .7152 * linear[1] + .0722 * linear[2];
+}
+function rgb(hex: string): number[] { return [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16)); }
+export function needsLightInk(hex: string): boolean { return luminance(rgb(hex)) < .18; }
 export function ink(hex: string): string {
-  const c = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255)
-    .map(v => v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4);
-  const l = .2126 * c[0] + .7152 * c[1] + .0722 * c[2];
-  return (l + .05) / .05 > 1.05 / (l + .05) ? '#000000' : '#ffffff';
+  const channels = rgb(hex);
+  const background = luminance(channels), darken = !needsLightInk(hex);
+  const tone = (portion: number) => channels.map(channel => Math.round(darken ? channel * portion : channel + (255 - channel) * portion));
+  let low = 0, high = 1;
+  for (let step = 0; step < 12; step++) {
+    const middle = (low + high) / 2, foreground = luminance(tone(middle));
+    const contrast = darken ? (background + .05) / (foreground + .05) : (foreground + .05) / (background + .05);
+    if ((contrast >= 4.5) === darken) low = middle; else high = middle;
+  }
+  return `#${tone(darken ? low : high).map(channel => channel.toString(16).padStart(2, '0')).join('')}`;
 }
 export function summaryPeriods(account: Quota, settings: Settings): Period[] {
   if (!settings.showFive) return ['seven'];

@@ -4,15 +4,18 @@
 
 - 用户确认改用 Electron + React + TypeScript；WPF 实现保留在当前仓库，并加标签 `wpf-baseline` 指向 `ee75647`。
 - 实现透明置顶浮球、整块区域拖动、四边吸附、贴边账号轮播、悬停明细和失焦透明度。
+- 拖动进入吸附范围时显示不接收鼠标输入的贴边形态预览，松手后正式吸附；失焦透明度滑块支持连续拖动并在松手后保存。
 - 实现自绘托盘右键菜单、浮球右键菜单及自绘五页设置。账号页支持本地别名；显示页支持名称宽度。
+- 托盘菜单以非激活方式打开，避免主动夺取 Windows“更多图标”面板焦点；菜单关闭时才主动结束其焦点状态。
 - 「样式」页支持三色预览、字号、粗细与 TTF 导入；本地字体协议只读取固定的用户字体文件。
+- 字号和粗细只作用于浮球及设置中的预览，设置页保持固定排版；进度条文字按背景色计算同色系文字并满足至少 4.5:1 对比度。
 - 进度条已对齐 sub2api `UsageProgressBar.vue`：已用 75%/90%、剩余 50%/20% 分级，默认使用 Tailwind green/amber/red-500；旧版默认配色自动迁移，自定义颜色保留。
 - sub2api 0.2.8 登录、2FA、管理员校验、账号读取、额度刷新及 Windows `safeStorage` 加密会话已实现。
-- `npm run typecheck`、`npm test`、`npm run build`、`npm run pack` 通过。Vitest 14 项测试通过，`npm audit` 显示 0 个漏洞。
-- Playwright 真实 Electron 窗口验证包括进度条与名称拖动、悬停及固定明细、失焦 65% 透明、别名/宽度/字体、贴边与轮播，以及本地模拟服务器的邮箱密码、2FA、管理员和额度流程。
+- `npm run typecheck`、`npm test`、`npm run build`、`npm run pack` 通过。Vitest 15 项测试通过，`npm audit` 显示 0 个漏洞。
+- Playwright 真实 Electron 窗口验证包括进度条与名称拖动、悬停及固定明细、透明度滑块连续拖动、字号作用范围、拖动中的吸附预览、贴边与轮播，以及本地模拟服务器的邮箱密码、2FA、管理员和额度流程。
 - `release/win-unpacked/Sub2API Quota Monitor.exe` 的打包版本也通过同一套窗口与字体验证。
 
-Electron 报告和截图：`artifacts/electron-smoke/`、`artifacts/electron-packed-smoke/`。本机两块屏幕的缩放比例都是 100%，已验证两屏工作区坐标；不同 DPI 的组合、真实服务器与托盘位置仍需实机联调。旧 WPF 的验证记录保留在下文。
+Electron 报告和截图：`artifacts/electron-smoke/`、`artifacts/electron-packed-smoke/`。本机两块屏幕的缩放比例都是 100%，已验证两屏工作区坐标；不同 DPI 的组合、真实服务器及 Windows“更多图标”面板的保留行为仍需实机联调。旧 WPF 的验证记录保留在下文。
 
 ## WPF 基线记录
 

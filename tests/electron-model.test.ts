@@ -24,7 +24,19 @@ describe('compact quota display', () => {
     expect(percent(quota.seven, settings)).toBe('16%');
     expect(color(quota.seven!.used, settings)).toBe(settings.criticalColor);
     expect(summaryPeriods(quota, settings)).toEqual(['seven']);
-    expect(ink(defaults.warningColor)).toBe('#000000');
+  });
+  it('derives readable text from each progress color', () => {
+    const luminance = (hex: string) => {
+      const rgb = [1, 3, 5].map(index => parseInt(hex.slice(index, index + 2), 16) / 255)
+        .map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4);
+      return .2126 * rgb[0] + .7152 * rgb[1] + .0722 * rgb[2];
+    };
+    for (const background of [defaults.normalColor, defaults.warningColor, defaults.criticalColor, '#102034']) {
+      const foreground = ink(background), brighter = Math.max(luminance(background), luminance(foreground));
+      const darker = Math.min(luminance(background), luminance(foreground));
+      expect((brighter + .05) / (darker + .05)).toBeGreaterThanOrEqual(4.5);
+      expect(foreground).not.toMatch(/^#(?:000000|ffffff)$/);
+    }
   });
   it('matches sub2api progress colors at both sets of boundaries', () => {
     expect([defaults.normalColor, defaults.warningColor, defaults.criticalColor]).toEqual(['#22c55e', '#f59e0b', '#ef4444']);

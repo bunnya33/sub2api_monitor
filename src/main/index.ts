@@ -16,14 +16,16 @@ const single = app.requestSingleInstanceLock();
 if (!single) app.quit();
 
 let store: Store, config: Configuration, controller: Controller, floating: BrowserWindow;
-let detail: BrowserWindow | null = null, settings: BrowserWindow | null = null, menu: BrowserWindow | null = null, tray: Tray;
+let detail: BrowserWindow | null = null, settings: BrowserWindow | null = null, menu: BrowserWindow | null = null;
+let snapPreview: BrowserWindow | null = null, tray: Tray;
 let edge: Edge = null, rotatingIndex = 0, visible = true, overFloating = false, overDetail = false, pinned = false;
+let snapPreviewEdge: Edge = null, menuFromTray = false, menuLeaveTimer: NodeJS.Timeout | null = null;
 let dragging = false, dragTimer: NodeJS.Timeout | null = null, leaveTimer: NodeJS.Timeout | null = null, hoverTimer: NodeJS.Timeout | null = null;
 let dragOrigin: { native: Electron.Point; bounds: Electron.Rectangle; offsetX: number; offsetY: number; pointerX: number; pointerY: number } | null = null;
 let rotationTimer: NodeJS.Timeout, nextRotation = 0, opacityTimer: NodeJS.Timeout | null = null;
 let currentOpacity = 1;
 
-function url(window: BrowserWindow, view: 'floating' | 'detail' | 'settings' | 'menu'): void {
+function url(window: BrowserWindow, view: 'floating' | 'detail' | 'settings' | 'menu' | 'snap-preview'): void {
   if (process.env.ELECTRON_RENDERER_URL) void window.loadURL(`${process.env.ELECTRON_RENDERER_URL}?view=${view}`);
   else void window.loadFile(path.join(__dirname, '../renderer/index.html'), { query: { view } });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -41,7 +43,12 @@ function senderView(event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent):
   if (sender === detail?.webContents) return 'detail';
   if (sender === settings?.webContents) return 'settings';
   if (sender === menu?.webContents) return 'menu';
+  if (sender === snapPreview?.webContents) return 'snap-preview';
   return null;
+}
+function previewState(): Snapshot {
+  return { ...controller.state, edge: snapPreviewEdge,
+    collapsed: !!(snapPreviewEdge && controller.state.settings.autoCollapse) };
 }
 function publish(): void {
   controller.state.edge = edge;
@@ -50,6 +57,7 @@ function publish(): void {
   controller.state.visible = visible;
   controller.state.detailPinned = pinned;
   for (const window of [floating, detail, settings, menu]) if (window && !window.isDestroyed()) window.webContents.send('state', controller.state);
+  if (snapPreview && !snapPreview.isDestroyed()) snapPreview.webContents.send('state', previewState());
   applyOpacity();
 }
 function save(): void {
@@ -76,6 +84,30 @@ function savePosition(): void {
   config.position = { ...floating.getBounds(), edge };
   store.saveConfig(config);
 }
+function hideSnapPreview(): void {
+  snapPreviewEdge = null;
+  snapPreview?.hide();
+}
+function moveFloatingDuringDrag(x: number, y: number): void {
+  floating.setPosition(Math.round(x), Math.round(y));
+  const rect = floating.getBounds(), work = displayFor(rect).workArea;
+  const contained = clampRect(rect, work);
+  const candidate = snapEdge(contained, work);
+  if (!candidate) { hideSnapPreview(); return; }
+  const changed = snapPreviewEdge !== candidate;
+  snapPreviewEdge = candidate;
+  if (!snapPreview || snapPreview.isDestroyed()) {
+    snapPreview = makeWindow(1, 1);
+    snapPreview.setIgnoreMouseEvents(true);
+    snapPreview.setAlwaysOnTop(true, 'floating');
+    url(snapPreview, 'snap-preview');
+    snapPreview.on('closed', () => { snapPreview = null; });
+  }
+  const target = size(controller.state.settings, controller.state.quotas, candidate, controller.state.settings.autoCollapse);
+  snapPreview.setBounds(clampRect({ ...contained, ...target }, work, candidate));
+  if (!snapPreview.isVisible()) snapPreview.showInactive();
+  if (changed) publish();
+}
 function stopDrag(): void {
   if (!dragging) return;
   dragging = false;
@@ -84,6 +116,7 @@ function stopDrag(): void {
   const work = displayFor(rect).workArea;
   const contained = clampRect(rect, work);
   dragOrigin = null;
+  hideSnapPreview();
   edge = snapEdge(contained, work);
   resizeFloating({ x: contained.x, y: contained.y });
   savePosition();
@@ -93,6 +126,7 @@ function stopDrag(): void {
 function beginDrag(pointerX: number, pointerY: number): void {
   if (dragging || !floating.isVisible()) return;
   hideDetail(); closeMenu();
+  hideSnapPreview();
   const cursor = screen.getCursorScreenPoint(), bounds = floating.getBounds();
   const xRatio = (cursor.x - bounds.x) / bounds.width, yRatio = (cursor.y - bounds.y) / bounds.height;
   if (edge) {
@@ -106,7 +140,7 @@ function beginDrag(pointerX: number, pointerY: number): void {
   dragTimer = setInterval(() => {
     if (!dragging) return;
     const point = screen.getCursorScreenPoint();
-    if (point.x !== cursor.x || point.y !== cursor.y) floating.setPosition(Math.round(point.x - offsetX), Math.round(point.y - offsetY));
+    if (point.x !== cursor.x || point.y !== cursor.y) moveFloatingDuringDrag(point.x - offsetX, point.y - offsetY);
   }, 16);
   applyOpacity();
 }
@@ -158,8 +192,15 @@ function hover(surface: 'floating' | 'detail', inside: boolean): void {
   nextRotation = Date.now() + controller.state.settings.rotateSeconds * 1000;
   applyOpacity();
 }
-function closeMenu(): void { menu?.hide(); }
-function openMenu(x: number, y: number): void {
+function closeMenu(dismissOverflow = false): void {
+  if (menuLeaveTimer) { clearTimeout(menuLeaveTimer); menuLeaveTimer = null; }
+  if (dismissOverflow && menuFromTray && menu?.isVisible() && !menu.isFocused()) menu.focus();
+  menu?.hide(); menuFromTray = false;
+}
+function openMenu(x: number, y: number, fromTray = false): void {
+  if (fromTray && menu?.isVisible() && menuFromTray) { closeMenu(true); return; }
+  if (menuLeaveTimer) { clearTimeout(menuLeaveTimer); menuLeaveTimer = null; }
+  menuFromTray = fromTray;
   if (!menu || menu.isDestroyed()) {
     menu = makeWindow(176, 164, true);
     url(menu, 'menu');
@@ -168,7 +209,9 @@ function openMenu(x: number, y: number): void {
   }
   const work = screen.getDisplayNearestPoint({ x, y }).workArea;
   menu.setBounds(clampRect({ x, y, width: 176, height: 164 }, work));
-  menu.show(); menu.focus(); publish();
+  if (fromTray) menu.showInactive();
+  else { menu.show(); menu.focus(); }
+  publish();
 }
 function openSettings(): void {
   closeMenu();
@@ -182,14 +225,14 @@ function openSettings(): void {
   settings.show(); settings.focus(); publish();
 }
 function menuAction(action: 'settings' | 'refresh' | 'visibility' | 'quit'): void {
-  closeMenu();
+  closeMenu(true);
   if (action === 'settings') openSettings();
   if (action === 'refresh') void controller.refresh();
   if (action === 'visibility') { visible = !visible; if (visible) floating.showInactive(); else { pinned = false; hideDetail(); floating.hide(); } publish(); }
   if (action === 'quit') app.quit();
 }
 function setupIpc(): void {
-  ipcMain.handle('state:get', event => senderView(event) ? controller.state : null);
+  ipcMain.handle('state:get', event => senderView(event) === 'snap-preview' ? previewState() : senderView(event) ? controller.state : null);
   ipcMain.handle('settings:update', async (event, patch: Partial<Settings>) => {
     if (senderView(event) !== 'settings') return { ok: false, error: '无效窗口' };
     try { await controller.update(settingsSchema.partial().parse(patch)); resizeFloating(); return { ok: true, value: undefined }; }
@@ -237,8 +280,8 @@ function setupIpc(): void {
     if (senderView(event) !== 'floating' || !dragging || !dragOrigin || !Number.isFinite(x) || !Number.isFinite(y)) return;
     const native = screen.getCursorScreenPoint(), origin = dragOrigin;
     if (native.x !== origin.native.x || native.y !== origin.native.y)
-      floating.setPosition(Math.round(native.x - origin.offsetX), Math.round(native.y - origin.offsetY));
-    else floating.setPosition(Math.round(origin.bounds.x + x - origin.pointerX), Math.round(origin.bounds.y + y - origin.pointerY));
+      moveFloatingDuringDrag(native.x - origin.offsetX, native.y - origin.offsetY);
+    else moveFloatingDuringDrag(origin.bounds.x + x - origin.pointerX, origin.bounds.y + y - origin.pointerY);
   });
   ipcMain.on('hover', (event, surface: 'floating' | 'detail', inside: boolean) => {
     if (senderView(event) === surface) hover(surface, inside);
@@ -247,6 +290,11 @@ function setupIpc(): void {
   ipcMain.on('detail:close', event => { if (senderView(event) === 'detail') { pinned = false; hideDetail(); } });
   ipcMain.on('context-menu', (event, x: number, y: number) => { if (senderView(event) === 'floating') openMenu(x, y); });
   ipcMain.on('menu:action', (event, action: 'settings' | 'refresh' | 'visibility' | 'quit') => { if (senderView(event) === 'menu') menuAction(action); });
+  ipcMain.on('menu:hover', (event, inside: boolean) => {
+    if (senderView(event) !== 'menu' || !menuFromTray) return;
+    if (menuLeaveTimer) clearTimeout(menuLeaveTimer);
+    menuLeaveTimer = inside ? null : setTimeout(() => { if (!menu?.isFocused()) closeMenu(true); }, 400);
+  });
   ipcMain.on('settings:close', event => { if (senderView(event) === 'settings') settings?.hide(); });
 }
 
@@ -271,8 +319,8 @@ app.whenReady().then(() => {
   const icon = nativeImage.createFromPath(path.join(app.getAppPath(), 'assets/app.png'));
   tray = new Tray(icon);
   tray.setToolTip('Sub2API Quota Monitor');
-  tray.on('right-click', () => { const cursor = screen.getCursorScreenPoint(); openMenu(cursor.x, cursor.y - 164); });
-  tray.on('click', () => { const cursor = screen.getCursorScreenPoint(); openMenu(cursor.x, cursor.y - 164); });
+  tray.on('right-click', () => { const cursor = screen.getCursorScreenPoint(); openMenu(cursor.x, cursor.y - 164, true); });
+  tray.on('click', () => { const cursor = screen.getCursorScreenPoint(); openMenu(cursor.x, cursor.y - 164, true); });
   setupIpc();
   controller.on('state', () => { resizeFloating(); publish(); });
   screen.on('display-metrics-changed', () => resizeFloating());
@@ -288,6 +336,6 @@ app.whenReady().then(() => {
   void controller.start().then(() => { if (controller.state.connection.status === 'disconnected' && !config.settings.demo) openSettings(); });
 });
 app.on('before-quit', () => {
-  for (const timer of [dragTimer, opacityTimer, leaveTimer, hoverTimer, rotationTimer]) if (timer) clearInterval(timer);
+  for (const timer of [dragTimer, opacityTimer, leaveTimer, hoverTimer, rotationTimer, menuLeaveTimer]) if (timer) clearInterval(timer);
   controller?.dispose();
 });

@@ -10,6 +10,8 @@
   --ui-font: "Segoe UI", "Microsoft YaHei", sans-serif;
   --ui-size: 12px;
   --ui-weight: 400;
+  --floating-size: 12px;
+  --floating-weight: 400;
   font-family: var(--ui-font);
   font-size: var(--ui-size);
   font-weight: var(--ui-weight);
@@ -30,7 +32,9 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 input, select { color: var(--text); }
 .shell { width: 100%; height: 100%; background: var(--surface); border: 1px solid #dce4df; border-radius: 6px; box-shadow: 0 5px 20px #142d1d24; overflow: hidden; }
 .floating { width: 100%; height: 100%; padding: 6px; background: var(--surface); border: 1px solid #dce4df; border-radius: 6px; box-shadow: 0 2px 9px #142d1d22; cursor: grab; touch-action: none; }
+.floating, .preview, .font-preview { --ui-size: var(--floating-size); --ui-weight: var(--floating-weight); font-size: var(--ui-size); font-weight: var(--ui-weight); }
 .floating:active { cursor: grabbing; }
+.floating.snap-ghost { background: #f0fdf4ee; border: 1px dashed #16a34a; box-shadow: 0 0 0 2px #16a34a33, 0 4px 12px #142d1d22; pointer-events: none; cursor: default; }
 .floating.docked.left { border-radius: 0 6px 6px 0; }
 .floating.docked.right { border-radius: 6px 0 0 6px; }
 .floating.docked.top { border-radius: 0 0 6px 6px; }

@@ -46,6 +46,7 @@ const path = require('node:path');
     assert.deepEqual([state.settings.normalColor, state.settings.warningColor, state.settings.criticalColor], ['#22c55e', '#f59e0b', '#ef4444']);
     const warningFill = floating.locator('.floating-row').nth(1).locator('.meter').last().locator('.meter-fill');
     assert.equal(await warningFill.evaluate(element => getComputedStyle(element).backgroundColor), 'rgb(245, 158, 11)');
+    assert.notEqual(await floating.locator('.floating-row').nth(1).locator('.meter').last().locator('.meter-foreground').evaluate(element => getComputedStyle(element).color), 'rgb(0, 0, 0)');
     checks.push('sub2api default colors and 75/90 thresholds render in floating bar');
     let bounds = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('view=floating')).getBounds());
     assert.equal(bounds.width, 224); assert.equal(bounds.height, 64); checks.push('compact 224x64 size');
@@ -99,6 +100,16 @@ const path = require('node:path');
     await settings.waitForSelector('.settings');
     assert.equal(await settings.getByRole('tab').count(), 5); checks.push('custom frameless settings with five tabs');
     await settings.screenshot({ path: path.join(output, 'settings-display.png') });
+    const opacitySlider = settings.getByRole('slider', { name: '失焦不透明度' });
+    const sliderBox = await opacitySlider.boundingBox();
+    await settings.mouse.move(sliderBox.x + sliderBox.width * .2, sliderBox.y + sliderBox.height / 2);
+    await settings.mouse.down();
+    await settings.mouse.move(sliderBox.x + sliderBox.width * .85, sliderBox.y + sliderBox.height / 2, { steps: 6 });
+    const draggedOpacity = Number(await opacitySlider.inputValue());
+    assert.ok(draggedOpacity >= 75, `slider stopped during drag at ${draggedOpacity}`);
+    await settings.mouse.up();
+    await settings.waitForFunction(async value => (await window.desktop.getState()).settings.inactiveOpacity === value, draggedOpacity);
+    checks.push('inactive opacity slider follows a continuous drag and saves on release');
     await settings.getByRole('tab', { name: '样式' }).click();
     await settings.screenshot({ path: path.join(output, 'settings-style.png') });
     assert.equal(await settings.locator('input[type=color]').count(), 3); checks.push('three live color previews');
@@ -146,19 +157,47 @@ const path = require('node:path');
     await settings.getByText('文字加粗').locator('..').locator('input').check();
     const fontSize = settings.getByText('界面字号').locator('..').locator('input');
     await fontSize.fill('16'); await fontSize.blur();
-    await floating.waitForFunction(() => getComputedStyle(document.documentElement).getPropertyValue('--ui-size').trim() === '16px');
+    await floating.waitForFunction(() => getComputedStyle(document.documentElement).getPropertyValue('--floating-size').trim() === '16px');
     const weight = await floating.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--ui-weight').trim());
-    assert.equal(weight, '600'); checks.push('font size and weight apply to floating UI');
+    assert.equal(weight, '400');
+    const floatingTypography = await floating.evaluate(() => ({ size: getComputedStyle(document.querySelector('.floating')).fontSize,
+      weight: getComputedStyle(document.querySelector('.floating')).fontWeight }));
+    const settingsTypography = await settings.evaluate(() => ({ size: getComputedStyle(document.querySelector('.settings')).fontSize,
+      weight: getComputedStyle(document.querySelector('.settings')).fontWeight,
+      previewSize: getComputedStyle(document.querySelector('.preview')).fontSize,
+      previewWeight: getComputedStyle(document.querySelector('.preview')).fontWeight }));
+    assert.deepEqual(floatingTypography, { size: '16px', weight: '600' });
+    assert.deepEqual(settingsTypography, { size: '12px', weight: '400', previewSize: '16px', previewWeight: '600' });
+    checks.push('font size and weight affect floating UI and preview without resizing settings');
     await settings.getByRole('tab', { name: '显示' }).click();
     const displays = await app.evaluate(({ screen }) => screen.getAllDisplays().map(({ id, scaleFactor, workArea }) => ({ id, scaleFactor, workArea })));
     checks.push(`display work areas: ${JSON.stringify(displays)}`);
     const work = displays[displays.length - 1].workArea;
     await app.evaluate(({ BrowserWindow }, area) => {
       const window = BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('view=floating'));
-      window.setBounds({ x: area.x + 2, y: area.y + 100, width: window.getBounds().width, height: window.getBounds().height });
+      window.setBounds({ x: area.x + 80, y: area.y + 100, width: window.getBounds().width, height: window.getBounds().height });
     }, work);
-    await floating.evaluate(() => { window.desktop.drag(true, 0, 0); window.desktop.drag(false); });
+    await floating.evaluate(() => { window.desktop.drag(true, 100, 10); window.desktop.dragMove(0, 10); });
+    let snapPreview;
+    for (let attempt = 0; attempt < 20; attempt++) {
+      snapPreview = await app.evaluate(({ BrowserWindow }) => {
+        const window = BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('view=snap-preview'));
+        return window ? { visible: window.isVisible(), bounds: window.getBounds() } : null;
+      });
+      if (snapPreview?.visible) break;
+      await floating.waitForTimeout(50);
+    }
+    assert.equal(snapPreview?.visible, true);
+    assert.equal(snapPreview.bounds.x, work.x);
+    assert.equal(snapPreview.bounds.width, 64);
+    assert.equal(await floating.locator('.floating').evaluate(element => element.classList.contains('docked')), false);
+    const ghostPage = app.windows().find(window => window.url().includes('view=snap-preview'));
+    await ghostPage.waitForSelector('.snap-ghost.docked.left');
+    await ghostPage.screenshot({ path: path.join(output, 'snap-preview.png') });
+    checks.push('live snap preview shows the final docked shape without taking drag input');
+    await floating.evaluate(() => window.desktop.drag(false));
     await floating.waitForFunction(() => document.querySelector('.floating')?.classList.contains('docked'));
+    assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('view=snap-preview')).isVisible()), false);
     const dockBounds = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('view=floating')).getBounds());
     assert.equal(dockBounds.x, work.x); assert.equal(dockBounds.width, 64); checks.push('dock aligns with target display work area');
     await floating.screenshot({ path: path.join(output, 'dock-left.png') });

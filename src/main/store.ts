@@ -13,7 +13,8 @@ export class Store implements SessionVault {
     if (!existsSync(this.configPath)) return { settings: defaults, server: '', email: '', position: null };
     try {
       const raw = JSON.parse(readFileSync(this.configPath, 'utf8'));
-      const parsed = settingsSchema.parse({ ...defaults, ...raw.settings });
+      const parsed = settingsSchema.parse({ ...defaults, ...raw.settings,
+        showResetExpiry: raw.settings?.showResetExpiry ?? raw.settings?.showResetTime ?? defaults.showResetExpiry });
       const settings = raw.paletteVersion === 2 ? parsed : migrateLegacyPalette(parsed);
       const point = raw.position;
       const position = point && Number.isFinite(point.x) && Number.isFinite(point.y) && [null, 'left', 'right', 'top', 'bottom'].includes(point.edge)

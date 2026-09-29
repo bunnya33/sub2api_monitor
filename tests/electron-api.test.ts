@@ -30,12 +30,33 @@ describe('sub2api 0.2.8 session and usage', () => {
     expect(JSON.stringify(accounts)).not.toContain('must-not-copy');
     expect(accounts.every(item => !('credentials' in item))).toBe(true);
   });
-  it('keeps missing reset credits unknown and uses only the server reset query timestamp', () => {
+  it('selects the earliest unexpired reset card, leaving unknown and zero distinct', () => {
+    const now = Date.parse('2026-09-29T00:00:00Z');
     expect(mapResetCredits({ fetched_at: 1790676600 })).toBeNull();
     expect(mapResetCredits({ rate_limit_reset_credits: null, fetched_at: 1790676600 })).toBeNull();
     expect(mapResetCredits({ rate_limit_reset_credits: { available_count: -1 }, fetched_at: 1790676600 })).toBeNull();
-    expect(mapResetCredits({ rate_limit_reset_credits: { available_count: 0 }, fetched_at: 1790676600 })).toEqual({ available: 0, refreshedAt: 1790676600000 });
-    expect(mapResetCredits({ rate_limit_reset_credits: { available_count: 2 } })).toEqual({ available: 2, refreshedAt: null });
+    expect(mapResetCredits({ rate_limit_reset_credits: { available_count: 0, credits: [{ expires_at: '2026-10-01T00:00:00Z' }] } }, now))
+      .toEqual({ available: 0, nearestExpiresAt: null });
+    expect(mapResetCredits({ rate_limit_reset_credits: { available_count: 2 } }, now)).toEqual({ available: 2, nearestExpiresAt: null });
+    expect(mapResetCredits({ rate_limit_reset_credits: { available_count: 2, credits: [
+      { expires_at: '2026-09-28T00:00:00Z' }, { expires_at: 'bad' },
+      { expires_at: '2026-10-03T00:00:00Z' }, { expires_at: '2026-10-01T00:00:00Z' }
+    ] } }, now)).toEqual({ available: 2, nearestExpiresAt: Date.parse('2026-10-01T00:00:00Z') });
+  });
+  it('updates only the account status with the administrator token', async () => {
+    let sent: RequestInit | undefined;
+    const client = new Sub2ApiClient('https://example.invalid', new MemoryVault(), false, async (url, init) => {
+      const route = new URL(url).pathname;
+      if (route.endsWith('/login')) return response({ access_token: 'access' });
+      if (route.endsWith('/me')) return response({ role: 'admin' });
+      sent = init;
+      return response({ status: 'inactive' });
+    });
+    await client.login({ server: 'https://example.invalid', email: 'admin@example.com', password: 'secret' });
+    await client.setAccountStatus(7, 'inactive');
+    expect(sent?.method).toBe('PUT');
+    expect(JSON.parse(String(sent?.body))).toEqual({ status: 'inactive' });
+    expect((sent?.headers as Record<string, string>).Authorization).toBe('Bearer access');
   });
   it('queries reset credits only for OpenAI OAuth accounts and preserves quotas when that query is limited', async () => {
     const paths: string[] = [];

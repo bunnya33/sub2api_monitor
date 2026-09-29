@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Check, Eye, EyeOff, LogOut, RefreshCw, Settings2, Upload, X } from 'lucide-react';
-import { alias, color, defaults, ink, metric, migrateLegacyPalette, needsLightInk, outlineInk, percent, shortName, summaryPeriods, supportsFive, visiblePeriods,
+import { alias, color, defaults, ink, metric, migrateLegacyPalette, needsLightInk, outlineInk, percent, resetCountdown, shortName, summaryPeriods, supportsFive, visiblePeriods,
   type DesktopAPI, type Period, type Quota, type QuotaWindow, type Settings, type Snapshot } from '../../shared/model';
 import { detailHeight, size } from '../../shared/geometry';
 import './style.css';
@@ -18,11 +18,12 @@ function browserPreview(): DesktopAPI {
     { id: 1, name: '示例 C1', platform: 'anthropic', type: 'oauth', status: 'active', planType: 'plus', subscriptionExpiresAt: now + 1209600000, resetCredits: null,
       five: { used: 32, resetsAt: now + 8280000 }, seven: { used: 58, resetsAt: now + 280800000 } },
     { id: 2, name: '示例 O2', platform: 'openai', type: 'oauth', status: 'active', planType: 'pro_5x', subscriptionExpiresAt: now + 1814400000,
-      resetCredits: { available: 2, refreshedAt: now }, five: { used: 19, resetsAt: now + 14700000 }, seven: { used: 84, resetsAt: now + 129600000 } }
+      resetCredits: { available: 2, nearestExpiresAt: now + 259200000 }, five: { used: 19, resetsAt: now + 14700000 }, seven: { used: 84, resetsAt: now + 129600000 } }
   ].map(value => ({ ...value, source: 'demo', updatedAt: now, fetchedAt: now, error: null, resetCreditsError: null }));
   let settings: Settings;
   try {
-    settings = { ...defaults, ...JSON.parse(localStorage.getItem('quota-preview-settings') || '{}') };
+    const saved = JSON.parse(localStorage.getItem('quota-preview-settings') || '{}');
+    settings = { ...defaults, ...saved, showResetExpiry: saved.showResetExpiry ?? saved.showResetTime ?? defaults.showResetExpiry };
     if (!localStorage.getItem('quota-preview-palette-v2')) {
       settings = migrateLegacyPalette(settings);
       localStorage.setItem('quota-preview-settings', JSON.stringify(settings));
@@ -40,6 +41,7 @@ function browserPreview(): DesktopAPI {
       state = { ...state, settings, quotas: quotas.filter(item => settings.selectedIds.includes(item.id)) }; publish(); return { ok: true, value: undefined }; },
     login: async () => ({ ok: false, error: '请在桌面客户端登录服务器' }), verify: async () => ({ ok: false, error: '请在桌面客户端验证' }),
     logout: async () => ({ ok: true, value: undefined }), refresh: async () => { state = { ...state, lastRefresh: Date.now() }; publish(); return { ok: true, value: undefined }; },
+    setAccountStatus: async () => ({ ok: false, error: '演示数据不可修改' }),
     importFont: async () => ({ ok: false, error: '请在桌面客户端导入字体' }), removeFont: async () => ({ ok: true, value: undefined }),
     drag: () => {}, dragMove: () => {}, hover: () => {},
     openContextMenu: () => { location.search = '?view=menu'; },
@@ -52,17 +54,16 @@ function browserPreview(): DesktopAPI {
 if (!window.desktop) window.desktop = browserPreview();
 const platform = (value: string) => value === 'anthropic' ? 'Claude' : value === 'openai' ? 'OpenAI' : value;
 const time = (value: number | null) => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '--';
+const supportsResetCards = (account: Quota) => account.platform === 'openai' && account.type === 'oauth';
+const showResetExpiry = (account: Quota) => supportsResetCards(account) && account.resetCredits?.available !== 0;
+const resetCountText = (account: Quota) => !supportsResetCards(account) || account.resetCredits?.available === 0
+  ? '无重置卡' : account.resetCredits ? `${account.resetCredits.available} 次` : '--';
 const subscription = (value?: string) => {
   if (!value) return '--';
   const plan = value.trim().toLowerCase().replace(/_/g, ' ');
   return plan.replace(/\b(plus|pro|max|free|team|business|enterprise|ultra)\b/g, name => name[0].toUpperCase() + name.slice(1));
 };
-const reset = (value: number | null) => {
-  if (!value) return '重置时间未知';
-  const delta = Math.max(0, value - Date.now()), hours = Math.floor(delta / 3600000), minutes = Math.floor(delta / 60000) % 60;
-  return hours >= 24 ? `${Math.floor(hours / 24)}天${hours % 24}小时后重置` : `${hours}小时${minutes}分后重置`;
-};
-function Meter({ quota, settings, label, period }: { quota: QuotaWindow | null; settings: Settings; label: string; period?: Period }) {
+function Meter({ quota, settings, label, period, countdown }: { quota: QuotaWindow | null; settings: Settings; label: string; period?: Period; countdown?: string }) {
   const value = quota ? Math.max(0, Math.min(100, metric(quota.used, settings))) : 0;
   const fill = quota ? color(quota.used, settings) : '#aeb8b3';
   const textColor = quota ? ink(fill) : undefined;
@@ -74,6 +75,7 @@ function Meter({ quota, settings, label, period }: { quota: QuotaWindow | null; 
     {quota && <><span className="meter-fill" style={{ width: `${value}%`, backgroundColor: fill }}/>
       <span className="meter-value meter-foreground" style={{ color: textColor, clipPath: `inset(0 ${100 - value}% 0 0)` }}>{text}</span></>}
     {period && <span className={`meter-tag ${period}`} aria-hidden="true">{period === 'five' ? '5h' : '7d'}</span>}
+    {countdown !== undefined && <span className="meter-countdown" aria-label={`距离重置 ${countdown}`}>{countdown}</span>}
   </div>;
 }
 function useSnapshot() {
@@ -137,25 +139,44 @@ function Floating({ state, ghost = false }: { state: Snapshot; ghost?: boolean }
   </div>;
 }
 function Detail({ state }: { state: Snapshot }) {
-  return <div className="detail shell" style={{ '--detail-height': `${detailHeight(state.quotas.length, state.settings)}px` } as React.CSSProperties}
+  const [now, setNow] = useState(Date.now());
+  const [updatingId, setUpdatingId] = useState<number | null>(null);
+  const [statusError, setStatusError] = useState<{ id: number; message: string } | null>(null);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  async function toggleStatus(id: number, status: 'active' | 'inactive') {
+    setUpdatingId(id); setStatusError(null);
+    const result = await window.desktop.setAccountStatus(id, status);
+    if (!result.ok) setStatusError({ id, message: result.error });
+    setUpdatingId(null);
+  }
+  return <div className="detail shell" style={{ '--detail-height': `${detailHeight(state.quotas, state.settings)}px` } as React.CSSProperties}
     onPointerEnter={() => window.desktop.hover('detail', true)} onPointerLeave={() => window.desktop.hover('detail', false)}>
     <header className="detail-head"><strong>额度明细</strong><div className="icon-actions">
       <button title="刷新额度" aria-label="刷新额度" onClick={() => void window.desktop.refresh()} disabled={state.busy}><RefreshCw size={15}/></button>
     </div></header>
     <main className="detail-list">{state.quotas.length ? state.quotas.map(account => <section className="detail-account" key={account.id}>
-      <div className="detail-title"><strong title={account.name}>{alias(account, state.settings)}</strong><span>{account.error ? '缓存' : account.status === 'active' ? '可用' : account.status}</span></div>
-      <div className="detail-sub">{platform(account.platform)} · {account.type} · <span className="subscription-plan">订阅 {subscription(account.planType)}</span></div>
-      <div className="subscription-expiry">订阅到期 {time(account.subscriptionExpiresAt ?? null)}</div>
+      <div className="detail-title"><strong title={account.name}>{alias(account, state.settings)}</strong>
+        {state.settings.showStatusToggle && state.connection.status === 'connected' && ['active', 'inactive'].includes(account.status)
+          ? <button className="status-switch" role="switch" aria-label={`${alias(account, state.settings)}账号状态`} aria-checked={account.status === 'active'}
+            title={account.status === 'active' ? '停用账号' : '启用账号'} disabled={updatingId !== null}
+            onClick={() => void toggleStatus(account.id, account.status === 'active' ? 'inactive' : 'active')}>
+            <span className="switch-track"><span className="switch-thumb"/></span><span>{account.status === 'active' ? '可用' : '停用'}</span>
+          </button> : <span>{account.error ? '缓存' : account.status === 'active' ? '可用' : account.status}</span>}</div>
+      <div className="detail-sub">{platform(account.platform)} · {account.type} · <span className="subscription-plan">订阅 {subscription(account.planType)} · 到期 {time(account.subscriptionExpiresAt ?? null)}</span></div>
       <div className={`detail-windows ${supportsFive(account) ? '' : 'single'}`}>{(supportsFive(account) ? ['five', 'seven'] as Period[] : ['seven'] as Period[]).map(period => <div key={period}>
-        <div className="window-label">{period === 'five' ? '5 小时' : '7 天'} · {state.settings.metric === 'used' ? '已用' : '剩余'}</div>
-        <Meter quota={account[period]} settings={state.settings} period={period} label={`${alias(account, state.settings)} · ${period === 'five' ? '5 小时' : '7 天'}`}/>
-        <div className="reset" title={account[period]?.resetsAt ? time(account[period]!.resetsAt) : '未知'}>{reset(account[period]?.resetsAt ?? null)}</div>
+        <Meter quota={account[period]} settings={state.settings} period={period} countdown={resetCountdown(account[period]?.resetsAt ?? null, now)}
+          label={`${alias(account, state.settings)} · ${period === 'five' ? '5 小时' : '7 天'} · ${account[period]?.resetsAt ? `重置于 ${time(account[period]!.resetsAt)}` : '重置时间未知'}`}/>
       </div>)}</div>
-      {(state.settings.showResetCount || state.settings.showResetTime) && <div className="detail-credits">
-        {state.settings.showResetCount && <div className="reset-count" title="当前可用的额度重置次数"><span>重置次数</span><strong>{account.resetCredits ? `${account.resetCredits.available} 次` : '--'}</strong></div>}
-        {state.settings.showResetTime && <div className="reset-refreshed"><span>次数刷新于</span><time>{time(account.resetCredits?.refreshedAt ?? null)}</time></div>}
+      {(state.settings.showResetCount || state.settings.showResetExpiry && showResetExpiry(account)) && <div className="detail-credits">
+        {state.settings.showResetCount && <div className="reset-count" title="当前可用的额度重置次数"><span>重置次数</span><strong>{resetCountText(account)}</strong></div>}
+        {state.settings.showResetExpiry && showResetExpiry(account) &&
+          <div className="reset-expiry"><span>最近重置卡到期</span><time>{time(account.resetCredits?.nearestExpiresAt ?? null)}</time></div>}
         {account.resetCreditsError && <div className="error">重置次数更新失败：{account.resetCreditsError}</div>}
       </div>}
+      {statusError?.id === account.id && <div className="error status-error">{statusError.message}</div>}
       {account.error && <div className="error">{account.error}</div>}
     </section>) : <div className="empty-note">{state.connection.message}</div>}</main>
     <footer className="detail-foot"><span>刷新于 {time(state.lastRefresh)}</span><span>{state.busy ? '刷新中' : state.connection.status === 'demo' ? '演示数据' : state.error ? '部分数据未更新' : state.connection.message}</span></footer>
@@ -212,7 +233,8 @@ function Settings({ state }: { state: Snapshot }) {
         {checkbox('显示 5 小时额度', 'showFive')}
         {checkbox('显示 7 天额度', 'showSeven')}
         {checkbox('显示重置次数', 'showResetCount')}
-        {checkbox('显示重置次数刷新时间', 'showResetTime')}
+        {checkbox('显示最近重置卡到期', 'showResetExpiry')}
+        {checkbox('启用账号状态开关', 'showStatusToggle')}
         {checkbox('贴边自动收起', 'autoCollapse')}
         {number('进度条宽度', 'barWidth', 40, 240, 'px')}
         {number('名称宽度', 'nameWidth', 36, 200, 'px')}

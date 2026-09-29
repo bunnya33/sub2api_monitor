@@ -12,7 +12,8 @@
 | GET | `/api/v1/admin/accounts?page=1&page_size=100&lite=true` | 分页获取账号基本信息 |
 | GET | `/api/v1/admin/accounts/{id}/usage?source=passive&force=false` | Claude OAuth / setup-token 的被动额度 |
 | GET | `/api/v1/admin/accounts/{id}/usage?source=active&force=false` | 其他账号沿用服务端查询和缓存 |
-| GET | `/api/v1/admin/openai/accounts/{id}/quota` | OpenAI OAuth 的可用重置次数及服务端查询时间 |
+| GET | `/api/v1/admin/openai/accounts/{id}/quota` | OpenAI OAuth 的可用重置卡及到期时间 |
+| PUT | `/api/v1/admin/accounts/{id}` | 管理员仅提交 `{status:"active"|"inactive"}` 更新账号状态 |
 
 管理员接口使用 `Authorization: Bearer <access_token>`。普通推理 Key 不适用。响应外层采用 sub2api 的 `{code, message, data}`；错误响应与 HTTP 状态都要处理。
 
@@ -22,9 +23,11 @@
 
 服务端时间和本次客户端读取时间在内部保留，详情不再展示这两个账号时间；缺失窗口显示 `--`。单账号失败保留旧成功数据及旧时间，其他账号继续更新。429 暂停本轮后续账号请求，遵守 `Retry-After`；缺省至少等待 30 秒。
 
-OpenAI OAuth 每轮额外读取 `/admin/openai/accounts/{id}/quota`。详情中的“重置次数”取 `rate_limit_reset_credits.available_count`，表示当前可用次数；“次数刷新于”取同一响应的 `fetched_at`（Unix 秒转换为毫秒）。缺失次数保持未知，不能当成 0；缺失查询时间显示 `--`，不能用客户端读取时间填充。Claude 等未提供该数据的平台显示 `--`。查询失败保留上次次数及对应时间并显示错误，正常额度条仍可更新；查询成功但缺少次数时清除旧次数。此处只查询信息，客户端没有消费重置次数的操作。
+OpenAI OAuth 每轮额外读取 `/admin/openai/accounts/{id}/quota`。详情中的“重置次数”取 `rate_limit_reset_credits.available_count`，表示当前可用次数；“最近重置卡到期”取同一响应 `credits[].expires_at` 中最近的未过期时间。确认 0 次或账号平台不支持重置卡时显示“无重置卡”，不显示到期行。OpenAI 查询失败或缺失次数保持未知，显示 `--`；有次数但没有有效到期时间也显示 `--`。查询失败保留上次次数及对应到期时间并提示错误，正常额度条仍可更新；查询成功但缺少次数时清除旧数据。客户端只查询重置卡，不消费卡。
 
-该接口可能把上游认证错误返回为 401/403。通过响应 `reason: OPENAI_QUOTA_UPSTREAM_ERROR` 识别为单账号查询失败，不触发管理员会话续期或注销；真正的管理员认证错误仍按原有规则续期或要求重新登录。
+详情账号状态只在管理员会话已连接、账号状态为 `active` 或 `inactive` 时可切换。调用服务端 `PUT /admin/accounts/{id}`，只提交 `status` 字段；服务端确认目标状态后才更新本地显示，失败时保留原状态。其他状态及演示模式仅显示文字。
+
+额度查询接口可能把上游认证错误返回为 401/403。通过响应 `reason: OPENAI_QUOTA_UPSTREAM_ERROR` 识别为单账号查询失败，不触发管理员会话续期或注销；真正的管理员认证错误仍按原有规则续期或要求重新登录。
 
 已核对源码：`frontend/src/api/auth.ts`、`frontend/src/api/admin/accounts.ts`、`backend/internal/handler/admin/account_handler.go`、`backend/internal/service/account_usage_service.go`、`backend/internal/handler/admin/openai_oauth_handler.go`、`backend/internal/service/openai_quota_service.go`。
 

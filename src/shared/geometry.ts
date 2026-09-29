@@ -30,12 +30,14 @@ export function snapEdge(rect: Rect, work: Rect, distance = 20): Edge {
   candidates.sort((a, b) => a[1] - b[1]);
   return candidates[0][1] <= distance ? candidates[0][0] : null;
 }
-export function detailHeight(count: number, settings: Settings): number {
-  const creditRows = Number(settings.showResetCount) + Number(settings.showResetTime);
-  return 64 + Math.max(1, count) * (144 + creditRows * 18);
+export function detailHeight(accounts: Quota[] | number, settings: Settings): number {
+  const count = Math.max(1, typeof accounts === 'number' ? accounts : accounts.length);
+  const expiryRows = typeof accounts === 'number' ? count : accounts.filter(account =>
+    account.platform === 'openai' && account.type === 'oauth' && account.resetCredits?.available !== 0).length;
+  return 64 + count * (98 + Number(settings.showResetCount) * 18) + Number(settings.showResetExpiry) * expiryRows * 18;
 }
-export function detailRect(ball: Rect, work: Rect, count: number, settings: Settings = defaults): Rect {
-  const width = Math.min(320, work.width - 16), height = Math.min(detailHeight(count, settings), work.height - 16);
+export function detailRect(ball: Rect, work: Rect, accounts: Quota[] | number, settings: Settings = defaults): Rect {
+  const width = Math.min(320, work.width - 16), height = Math.min(detailHeight(accounts, settings), work.height - 16);
   const options: Rect[] = [
     { x: ball.x + ball.width + 8, y: ball.y, width, height },
     { x: ball.x - width - 8, y: ball.y, width, height },

@@ -74,7 +74,7 @@ function resizeFloating(position?: { x: number; y: number }): void {
   const proposed = { x: position?.x ?? old.x, y: position?.y ?? old.y, ...target };
   const work = displayFor(proposed).workArea;
   floating.setBounds(clampRect(proposed, work, edge));
-  if (detail?.isVisible()) detail.setBounds(detailRect(floating.getBounds(), displayFor(floating.getBounds()).workArea, accounts.length, controller.state.settings));
+  if (detail?.isVisible()) detail.setBounds(detailRect(floating.getBounds(), displayFor(floating.getBounds()).workArea, accounts, controller.state.settings));
   publish();
 }
 function savePosition(): void {
@@ -165,7 +165,7 @@ function showDetail(): void {
     url(detail, 'detail');
     detail.on('closed', () => { detail = null; overDetail = false; });
   }
-  detail.setBounds(detailRect(floating.getBounds(), displayFor(floating.getBounds()).workArea, controller.state.quotas.length, controller.state.settings));
+  detail.setBounds(detailRect(floating.getBounds(), displayFor(floating.getBounds()).workArea, controller.state.quotas, controller.state.settings));
   if (!detail.isVisible()) detail.showInactive();
   publish();
 }
@@ -252,6 +252,12 @@ function setupIpc(): void {
     if (!senderView(event)) return { ok: false, error: '无效窗口' };
     try { await controller.refresh(); return { ok: true, value: undefined }; }
     catch (error) { return { ok: false, error: error instanceof Error ? error.message : '刷新失败' }; }
+  });
+  ipcMain.handle('account:status', async (event, id: number, status: 'active' | 'inactive') => {
+    if (senderView(event) !== 'detail') return { ok: false, error: '无效窗口' };
+    if (!Number.isSafeInteger(id) || id <= 0 || !['active', 'inactive'].includes(status)) return { ok: false, error: '账号状态参数无效' };
+    try { await controller.setAccountStatus(id, status); return { ok: true, value: undefined }; }
+    catch (error) { return { ok: false, error: error instanceof Error ? error.message : '更新账号状态失败' }; }
   });
   ipcMain.handle('font:import', async event => {
     if (senderView(event) !== 'settings') return { ok: false, error: '无效窗口' };

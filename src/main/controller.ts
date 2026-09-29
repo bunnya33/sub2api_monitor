@@ -7,7 +7,7 @@ export function demoQuotas(now = Date.now()): Quota[] {
     { id: 1, name: '示例 C1', platform: 'anthropic', type: 'oauth', status: 'active', planType: 'plus', subscriptionExpiresAt: now + 1209600000, resetCredits: null,
       five: { used: 32, resetsAt: now + 8280000 }, seven: { used: 58, resetsAt: now + 280800000 } },
     { id: 2, name: '示例 O2', platform: 'openai', type: 'oauth', status: 'active', planType: 'pro_5x', subscriptionExpiresAt: now + 1814400000,
-      resetCredits: { available: 2, refreshedAt: now }, five: { used: 19, resetsAt: now + 14700000 }, seven: { used: 84, resetsAt: now + 129600000 } }
+      resetCredits: { available: 2, nearestExpiresAt: now + 259200000 }, five: { used: 19, resetsAt: now + 14700000 }, seven: { used: 84, resetsAt: now + 129600000 } }
   ].map(a => ({ ...a, source: 'demo', updatedAt: now, fetchedAt: now, error: null, resetCreditsError: null }));
 }
 export class Controller extends EventEmitter {
@@ -16,6 +16,7 @@ export class Controller extends EventEmitter {
   private generation = 0;
   private selectionVersion = 0;
   private task: Promise<void> | null = null;
+  private statusTask: Promise<void> | null = null;
   private abort = new AbortController();
   private timer: NodeJS.Timeout;
   constructor(settings: Settings, private vault: SessionVault, private save: () => void, private fetcher?: Fetcher, server = '', email = '') {
@@ -120,6 +121,7 @@ export class Controller extends EventEmitter {
   }
   async refresh(): Promise<void> {
     if (this.task) return this.task;
+    if (this.statusTask) { await this.statusTask; return this.refresh(); }
     if (!['connected', 'demo'].includes(this.state.connection.status)) return;
     const generation = this.generation, selection = this.selectionVersion;
     this.state.busy = true; this.publish();
@@ -153,6 +155,31 @@ export class Controller extends EventEmitter {
       }
     })();
     this.task = task; await task; if (this.task === task) this.task = null;
+  }
+  async setAccountStatus(id: number, status: 'active' | 'inactive'): Promise<void> {
+    if (this.statusTask) throw new Error('账号状态正在更新');
+    if (this.state.connection.status !== 'connected' || !this.client) throw new Error('需要管理员登录才能修改账号状态');
+    const generation = this.generation, client = this.client;
+    const task = (async () => {
+      if (this.task) await this.task;
+      if (generation !== this.generation) throw new Error('会话已切换，请重试');
+      const account = this.state.available.find(item => item.id === id);
+      if (!account || !['active', 'inactive'].includes(account.status) || account.status === status) throw new Error('账号状态已变化，请刷新后重试');
+      this.state.nextRefresh = null;
+      try {
+        await client.setAccountStatus(id, status, this.abort.signal);
+        if (generation !== this.generation) throw new Error('会话已切换，请重试');
+        this.state.available = this.state.available.map(item => item.id === id ? { ...item, status } : item);
+        this.state.quotas = this.state.quotas.map(item => item.id === id ? { ...item, status } : item);
+      } catch (error) {
+        if (generation === this.generation && error instanceof ApiError && error.sessionError) this.fail(error);
+        throw error;
+      } finally {
+        if (generation === this.generation) { this.schedule(); this.publish(); }
+      }
+    })();
+    this.statusTask = task;
+    try { await task; } finally { if (this.statusTask === task) this.statusTask = null; }
   }
   dispose(): void { clearInterval(this.timer); this.abort.abort(); this.generation++; }
 }

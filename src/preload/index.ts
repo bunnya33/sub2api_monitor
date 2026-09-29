@@ -13,6 +13,7 @@ const api: DesktopAPI = {
   verify: (code: string) => ipcRenderer.invoke('auth:verify', code),
   logout: () => ipcRenderer.invoke('auth:logout'),
   refresh: () => ipcRenderer.invoke('quota:refresh'),
+  setAccountStatus: (id, status) => ipcRenderer.invoke('account:status', id, status),
   importFont: () => ipcRenderer.invoke('font:import'),
   removeFont: () => ipcRenderer.invoke('font:remove'),
   drag: (start: boolean, x?: number, y?: number) => ipcRenderer.send('drag', start, x, y),

@@ -33,13 +33,14 @@ export function mapUsage(account: Account, raw: unknown, now = Date.now()): Quot
     updatedAt: Number.isFinite(updated) ? updated : null, fetchedAt: now,
     error: typeof value.error === 'string' && value.error ? value.error.slice(0, 300) : null };
 }
-export function mapResetCredits(raw: unknown): ResetCredits | null {
-  const data = z.object({ rate_limit_reset_credits: z.object({ available_count: z.number().int().nonnegative() }).nullish(),
-    fetched_at: z.unknown().optional() }).safeParse(raw);
+export function mapResetCredits(raw: unknown, now = Date.now()): ResetCredits | null {
+  const data = z.object({ rate_limit_reset_credits: z.object({ available_count: z.number().int().nonnegative(),
+    credits: z.array(z.object({ expires_at: z.string().optional() })).optional() }).nullish() }).safeParse(raw);
   if (!data.success || !data.data.rate_limit_reset_credits) return null;
-  const timestamp = data.data.fetched_at;
+  const credits = data.data.rate_limit_reset_credits;
   return { available: data.data.rate_limit_reset_credits.available_count,
-    refreshedAt: typeof timestamp === 'number' && Number.isFinite(timestamp) && timestamp > 0 && timestamp <= 8.64e12 ? timestamp * 1000 : null };
+    nearestExpiresAt: credits.available_count > 0 ? credits.credits?.map(credit => Date.parse(credit.expires_at ?? ''))
+      .filter(expires => Number.isFinite(expires) && expires > now).sort((a, b) => a - b)[0] ?? null : null };
 }
 export class Sub2ApiClient {
   readonly server: string;
@@ -50,12 +51,12 @@ export class Sub2ApiClient {
   private refreshTask: Promise<void> | null = null;
   private email = '';
   constructor(server: string, private vault: SessionVault, private remember: boolean, private fetcher: Fetcher = fetch) { this.server = normalizeServer(server); }
-  private async raw(path: string, body?: unknown, token?: string, signal?: AbortSignal): Promise<unknown> {
+  private async raw(path: string, body?: unknown, token?: string, signal?: AbortSignal, method: 'POST' | 'PUT' = 'POST'): Promise<unknown> {
     let response: Response;
     try {
       const timeout = AbortSignal.timeout(20000);
       response = await this.fetcher(this.server + '/api/v1' + path, {
-        method: body === undefined ? 'GET' : 'POST', redirect: 'error', signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+        method: body === undefined ? 'GET' : method, redirect: 'error', signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
         headers: { Accept: 'application/json', ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(token ? { Authorization: 'Bearer ' + token } : {}) },
         body: body === undefined ? undefined : JSON.stringify(body)
       });
@@ -118,13 +119,13 @@ export class Sub2ApiClient {
     })().finally(() => { this.refreshTask = null; });
     return this.refreshTask;
   }
-  private async request(path: string, signal?: AbortSignal): Promise<unknown> {
+  private async request(path: string, signal?: AbortSignal, body?: unknown, method: 'POST' | 'PUT' = 'POST'): Promise<unknown> {
     if (this.expiresAt < Date.now() + 15000) await this.refreshTokens(this.accessToken, signal);
     const attempted = this.accessToken;
-    try { return await this.raw(path, undefined, attempted, signal); }
+    try { return await this.raw(path, body, attempted, signal, method); }
     catch (error) {
       if (!(error instanceof ApiError) || error.status !== 401 || !error.sessionError || !this.refreshToken) throw error;
-      await this.refreshTokens(attempted, signal); return this.raw(path, undefined, this.accessToken, signal);
+      await this.refreshTokens(attempted, signal); return this.raw(path, body, this.accessToken, signal, method);
     }
   }
   async listAccounts(signal?: AbortSignal): Promise<Account[]> {
@@ -142,6 +143,10 @@ export class Sub2ApiClient {
       if (accounts.length >= data.total || data.items.length === 0) return accounts;
     }
     throw new ApiError('账号分页数量超过客户端限制');
+  }
+  async setAccountStatus(id: number, status: 'active' | 'inactive', signal?: AbortSignal): Promise<void> {
+    const result = z.object({ status: z.string() }).parse(await this.request(`/admin/accounts/${id}`, signal, { status }, 'PUT'));
+    if (result.status !== status) throw new ApiError('服务器未确认账号状态更新');
   }
   async usages(accounts: Account[], signal?: AbortSignal): Promise<{ usage: Map<number, Quota>; errors: Map<number, string>; retryAfterMs: number }> {
     const usage = new Map<number, Quota>(), errors = new Map<number, string>();

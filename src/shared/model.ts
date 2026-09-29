@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 export const settingsSchema = z.object({
   metric: z.enum(['used', 'remaining']), showFive: z.boolean(), showSeven: z.boolean(),
-  showResetCount: z.boolean(), showResetTime: z.boolean(), autoCollapse: z.boolean(),
+  showResetCount: z.boolean(), showResetExpiry: z.boolean(), showStatusToggle: z.boolean(), autoCollapse: z.boolean(),
   summary: z.enum(['worst', 'both', 'five', 'seven']), barWidth: z.number().int().min(40).max(240),
   nameWidth: z.number().int().min(36).max(200), topWidth: z.number().int().min(120).max(400),
   sideWidth: z.number().int().min(48).max(240), autoRefresh: z.boolean(),
@@ -16,7 +16,7 @@ export const settingsSchema = z.object({
 });
 export type Settings = z.infer<typeof settingsSchema>;
 export const defaults: Settings = {
-  metric: 'used', showFive: true, showSeven: true, showResetCount: true, showResetTime: true, autoCollapse: true, summary: 'worst', barWidth: 68,
+  metric: 'used', showFive: true, showSeven: true, showResetCount: true, showResetExpiry: true, showStatusToggle: false, autoCollapse: true, summary: 'worst', barWidth: 68,
   nameWidth: 62, topWidth: 178, sideWidth: 64, autoRefresh: true, refreshSeconds: 60, rotateSeconds: 4,
   fadeInactive: true, inactiveOpacity: 65, normalColor: '#22c55e', warningColor: '#f59e0b',
   criticalColor: '#ef4444', textOutline: false, fontSize: 12, fontBold: false, fontName: '', rememberSession: true,
@@ -27,7 +27,7 @@ export type Period = 'five' | 'seven';
 export interface Rect { x: number; y: number; width: number; height: number }
 export interface Account { id: number; name: string; platform: string; type: string; status: string; planType?: string; subscriptionExpiresAt?: number | null }
 export interface QuotaWindow { used: number; resetsAt: number | null }
-export interface ResetCredits { available: number; refreshedAt: number | null }
+export interface ResetCredits { available: number; nearestExpiresAt: number | null }
 export interface Quota extends Account {
   five: QuotaWindow | null; seven: QuotaWindow | null; source: string;
   updatedAt: number | null; fetchedAt: number | null; error: string | null;
@@ -50,6 +50,7 @@ export interface DesktopAPI {
   verify(code: string): Promise<Result>;
   logout(): Promise<Result>;
   refresh(): Promise<Result>;
+  setAccountStatus(id: number, status: 'active' | 'inactive'): Promise<Result>;
   importFont(): Promise<Result<string>>;
   removeFont(): Promise<Result>;
   drag(start: boolean, x?: number, y?: number): void;
@@ -135,4 +136,12 @@ export function summaryPeriods(account: Quota, settings: Settings): Period[] {
 }
 export function emptyQuota(account: Account): Quota {
   return { ...account, five: null, seven: null, source: 'unknown', updatedAt: null, fetchedAt: null, error: null, resetCredits: null, resetCreditsError: null };
+}
+export function resetCountdown(resetsAt: number | null, now = Date.now()): string {
+  if (resetsAt === null || !Number.isFinite(resetsAt)) return '--';
+  const seconds = Math.max(0, Math.ceil((resetsAt - now) / 1000));
+  const two = (value: number) => String(value).padStart(2, '0');
+  if (seconds >= 86400) return `${two(Math.floor(seconds / 86400))}d${two(Math.floor(seconds % 86400 / 3600))}h`;
+  if (seconds >= 3600) return `${two(Math.floor(seconds / 3600))}h${two(Math.floor(seconds % 3600 / 60))}m`;
+  return `${two(Math.floor(seconds / 60))}m${two(seconds % 60)}s`;
 }

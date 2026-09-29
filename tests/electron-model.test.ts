@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { alias, color, defaults, ink, migrateLegacyPalette, outlineInk, percent, severity, shortName, summaryPeriods, supportsFive, visiblePeriods, type Quota } from '../src/shared/model';
-import { clampRect, detailRect, size, snapEdge } from '../src/shared/geometry';
+import { alias, color, defaults, ink, migrateLegacyPalette, outlineInk, percent, resetCountdown, severity, shortName, summaryPeriods, supportsFive, visiblePeriods, type Quota } from '../src/shared/model';
+import { clampRect, detailHeight, detailRect, size, snapEdge } from '../src/shared/geometry';
 import { mapUsage, normalizeServer } from '../src/main/api';
 
 const account = { id: 7, name: 'Claude-Production', platform: 'anthropic', type: 'oauth', status: 'active' };
@@ -76,6 +76,15 @@ describe('compact quota display', () => {
     expect(mapped.seven).toBeNull();
     expect(percent(mapped.seven, defaults)).toBe('--');
   });
+  it('formats the detail reset badge through day, hour and second boundaries', () => {
+    const now = 1_000_000;
+    expect(resetCountdown(null, now)).toBe('--');
+    expect(resetCountdown(now + (3 * 86400 + 2 * 3600) * 1000, now)).toBe('03d02h');
+    expect(resetCountdown(now + (2 * 3600 + 13 * 60) * 1000, now)).toBe('02h13m');
+    expect(resetCountdown(now + 185000, now)).toBe('03m05s');
+    expect(resetCountdown(now + 59000, now)).toBe('00m59s');
+    expect(resetCountdown(now - 1000, now)).toBe('00m00s');
+  });
 });
 
 describe('multi-display work area geometry', () => {
@@ -90,6 +99,12 @@ describe('multi-display work area geometry', () => {
     expect(rect.x).toBeGreaterThanOrEqual(work.x);
     expect(rect.x + rect.width).toBeLessThanOrEqual(work.x + work.width);
     expect(rect.y + rect.height).toBeLessThanOrEqual(work.y + work.height);
+  });
+  it('shrinks the detail when an account has no reset cards', () => {
+    const withCards = { ...quota, platform: 'openai', resetCredits: { available: 1, nearestExpiresAt: Date.now() + 86400000 } };
+    const noCards = { ...withCards, resetCredits: { available: 0, nearestExpiresAt: null } };
+    expect(detailHeight([withCards, noCards], defaults) - detailHeight([noCards, noCards], defaults)).toBe(18);
+    expect(detailHeight([withCards, noCards], { ...defaults, showResetExpiry: false })).toBe(detailHeight([noCards, noCards], { ...defaults, showResetExpiry: false }));
   });
 });
 

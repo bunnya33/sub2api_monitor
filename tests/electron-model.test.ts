@@ -11,7 +11,10 @@ describe('compact quota display', () => {
     expect(size(defaults, [quota, quota], null, false)).toEqual({ width: 224, height: 64 });
     expect(size({ ...defaults, showFive: false }, [quota, quota], null, false)).toEqual({ width: 150, height: 64 });
     expect(size({ ...defaults, nameWidth: 100, barWidth: 96 }, [quota, quota], null, false)).toEqual({ width: 318, height: 64 });
-    expect(size(defaults, [quota], 'top', true)).toEqual({ width: 178, height: 32 });
+    expect(size({ ...defaults, showConcurrency: true }, [quota, quota], null, false)).toEqual({ width: 266, height: 64 });
+    expect(size({ ...defaults, showConcurrency: true, concurrencyWidth: 24 }, [quota, quota], null, false)).toEqual({ width: 254, height: 64 });
+    expect(size({ ...defaults, showConcurrency: true }, [quota], 'left', true)).toEqual({ width: 64, height: 78 });
+    expect(size(defaults, [quota], 'top', true)).toEqual({ width: 160, height: 32 });
   });
   it('uses available periods for Plus and higher-tier accounts', () => {
     const plus = { ...quota, planType: 'plus' }, pro = { ...quota, planType: 'pro_5x' };
@@ -88,7 +91,10 @@ describe('compact quota display', () => {
     expect(resetCountdown(now + (86400 + 5 * 3600) * 1000, now)).toBe('1d5h');
     expect(resetCountdown(now + 5 * 3600000, now)).toBe('5h');
     expect(resetCountdown(now + (4 * 3600 + 3 * 60) * 1000, now)).toBe('4h3m');
-    expect(resetCountdown(now + 185000, now)).toBe('3m5s');
+    expect(resetCountdown(now + 185000, now)).toBe('3m');
+    expect(resetCountdown(now + 61000, now)).toBe('1m');
+    expect(resetCountdown(now + 60000, now)).toBe('1m');
+    expect(resetCountdown(now + 59999, now)).toBe('59s');
     expect(resetCountdown(now + 59000, now)).toBe('59s');
     expect(resetCountdown(now - 1000, now)).toBe('0s');
   });

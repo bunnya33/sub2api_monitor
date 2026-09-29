@@ -6,10 +6,10 @@ export function size(settings: Settings, accounts: Quota[], edge: Edge, collapse
     if (edge === 'top' || edge === 'bottom') return { width: settings.topWidth, height: 32 };
     const account = accounts[index % Math.max(1, accounts.length)];
     const count = Math.max(1, account ? summaryPeriods(account, settings, rotatingPeriod).length : 1);
-    return { width: settings.sideWidth, height: 30 + count * 22 + (count - 1) * 4 };
+    return { width: settings.sideWidth, height: 30 + count * 22 + (count - 1) * 4 + (settings.showConcurrency ? 26 : 0) };
   }
   const count = Math.max(0, ...accounts.map(account => visiblePeriods(account, settings).length));
-  return { width: 20 + settings.nameWidth + settings.barWidth * count + Math.max(0, count - 1) * 6,
+  return { width: 20 + settings.nameWidth + settings.barWidth * count + Math.max(0, count - 1) * 6 + (settings.showConcurrency ? settings.concurrencyWidth + 6 : 0),
     height: 14 + Math.max(1, accounts.length) * 22 + Math.max(0, accounts.length - 1) * 6 };
 }
 export function clampRect(rect: Rect, work: Rect, edge: Edge = null): Rect {

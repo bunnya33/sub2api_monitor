@@ -48,7 +48,7 @@ function browserPreview(): DesktopAPI {
     openContextMenu: () => { location.search = '?view=menu'; },
     menuAction: action => { if (action === 'settings') location.search = '?view=settings';
       if (action === 'refresh') { state = { ...state, lastRefresh: Date.now() }; publish(); } },
-    menuHover: () => {},
+    dismissMenu: () => { location.search = '?view=floating'; },
     closeSettings: () => { location.search = '?view=floating'; }
   };
 }
@@ -64,13 +64,12 @@ const subscription = (value?: string) => {
   const plan = value.trim().toLowerCase().replace(/_/g, ' ');
   return plan.replace(/\b(plus|pro|max|free|team|business|enterprise|ultra)\b/g, name => name[0].toUpperCase() + name.slice(1));
 };
-function Meter({ quota, settings, label, period, countdown, account }: { quota: QuotaWindow | null; settings: Settings; label: string; period?: Period; countdown?: string; account?: Quota }) {
+function Meter({ quota, settings, label, period, countdown }: { quota: QuotaWindow | null; settings: Settings; label: string; period?: Period; countdown?: string }) {
   const value = quota ? Math.max(0, Math.min(100, metric(quota.used, settings))) : 0;
   const fill = quota ? color(quota.used, settings) : '#aeb8b3';
   const textColor = quota ? ink(fill) : undefined;
   const text = percent(quota, settings);
-  const concurrency = settings.showConcurrency && account ? `${account.currentConcurrency ?? '--'}/${account.concurrency ?? '--'}` : null;
-  return <div className={`meter ${settings.textOutline ? 'outlined' : ''} ${period ? 'meter-tagged' : ''} ${concurrency ? 'has-concurrency' : ''}`}
+  return <div className={`meter ${settings.textOutline ? 'outlined' : ''} ${period ? 'meter-tagged' : ''}`}
     style={{ '--meter-outline': settings.textOutline && textColor ? outlineInk(textColor) : undefined,
       '--countdown-size': `${settings.countdownFontSize}px` } as React.CSSProperties}
     role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100}
@@ -79,9 +78,13 @@ function Meter({ quota, settings, label, period, countdown, account }: { quota: 
     {quota && <><span className="meter-fill" style={{ width: `${value}%`, backgroundColor: fill }}/>
       <span className="meter-value meter-foreground" style={{ color: textColor, clipPath: `inset(0 ${100 - value}% 0 0)` }}>{text}</span></>}
     {period && <span className={`meter-tag ${period}`} aria-hidden="true">{period === 'five' ? '5h' : '7d'}</span>}
-    {concurrency && <span className="meter-concurrency" title={`当前并发 / 上限 ${concurrency}`}>{concurrency}</span>}
     {countdown !== undefined && <span className="meter-countdown" aria-label={`距离重置 ${countdown}`}>{countdown}</span>}
   </div>;
+}
+function ConcurrencyCard({ account, settings }: { account: Quota; settings: Settings }) {
+  if (!settings.showConcurrency) return null;
+  const value = `${account.currentConcurrency ?? '--'}/${account.concurrency ?? '--'}`;
+  return <span className="concurrency-card" style={{ width: settings.concurrencyWidth }} title={`当前并发 / 上限 ${value}`} aria-label={`并发 ${value}`}>{value}</span>;
 }
 function useSnapshot() {
   const [state, setState] = useState<Snapshot>(demoState);
@@ -131,14 +134,16 @@ function Floating({ state, ghost = false }: { state: Snapshot; ghost?: boolean }
     onContextMenu={ghost ? undefined : event => { event.preventDefault(); window.desktop.openContextMenu(event.screenX, event.screenY); }}>
     {collapsed && active ? <div className={`dock-content ${state.edge === 'left' || state.edge === 'right' ? 'vertical' : 'horizontal'}`}>
       <span className="dock-name" title={alias(active, settings)}>{shortName(active, settings, state.rotatingIndex)}</span>
-      <div className="dock-bars">{dockPeriods.length ? dockPeriods.map(period => <Meter key={period} quota={active[period]} settings={settings} period={period} account={active}
-        label={`${alias(active, settings)} · ${period === 'five' ? '5 小时' : '7 天'}`} />) : <span className="dock-empty">--</span>}</div>
+      <div className="dock-bars">{dockPeriods.length ? dockPeriods.map(period => <Meter key={period} quota={active[period]} settings={settings} period={period}
+        label={`${alias(active, settings)} · ${period === 'five' ? '5 小时' : '7 天'}`} />) : <span className="dock-empty">--</span>}
+        <ConcurrencyCard account={active} settings={settings}/></div>
     </div> : <div className="floating-rows">
       {state.quotas.length ? state.quotas.map(account => <div className="floating-row" key={account.id}>
         <span className="account-name" title={account.name + (settings.aliases[String(account.id)] ? ` · 别名 ${alias(account, settings)}` : '') + (account.error ? ` · ${account.error}` : '')}
           style={{ width: settings.nameWidth }}>{alias(account, settings)}</span>
-        {visiblePeriods(account, settings).map(period => <Meter key={period} quota={account[period]} settings={settings} period={period} account={account}
+        {visiblePeriods(account, settings).map(period => <Meter key={period} quota={account[period]} settings={settings} period={period}
           label={`${alias(account, settings)} · ${period === 'five' ? '5 小时' : '7 天'}`} />)}
+        <ConcurrencyCard account={account} settings={settings}/>
       </div>) : <div className="floating-empty">{state.connection.status === 'authenticating' ? '连接中…' : '未登录'}</div>}
     </div>}
   </div>;
@@ -171,10 +176,10 @@ function Detail({ state }: { state: Snapshot }) {
             <span className="switch-track"><span className="switch-thumb"/></span><span>{account.status === 'active' ? '可用' : '停用'}</span>
           </button> : <span>{account.error ? '缓存' : account.status === 'active' ? '可用' : account.status}</span>}</div>
       <div className="detail-sub">{platform(account.platform)} · {account.type} · <span className="subscription-plan">订阅 {subscription(account.planType)} · 到期 {time(account.subscriptionExpiresAt ?? null)}</span></div>
-      <div className={`detail-windows ${supportsFive(account) ? '' : 'single'}`}>{(supportsFive(account) ? ['five', 'seven'] as Period[] : ['seven'] as Period[]).map(period => <div key={period}>
-        <Meter quota={account[period]} settings={state.settings} period={period} account={account} countdown={resetCountdown(account[period]?.resetsAt ?? null, now)}
+      <div className="detail-progress"><div className={`detail-windows ${supportsFive(account) ? '' : 'single'}`}>{(supportsFive(account) ? ['five', 'seven'] as Period[] : ['seven'] as Period[]).map(period => <div key={period}>
+        <Meter quota={account[period]} settings={state.settings} period={period} countdown={resetCountdown(account[period]?.resetsAt ?? null, now)}
           label={`${alias(account, state.settings)} · ${period === 'five' ? '5 小时' : '7 天'} · ${account[period]?.resetsAt ? `重置于 ${time(account[period]!.resetsAt)}` : '重置时间未知'}`}/>
-      </div>)}</div>
+      </div>)}</div><ConcurrencyCard account={account} settings={state.settings}/></div>
       {(state.settings.showResetCount || state.settings.showResetExpiry && showResetExpiry(account)) && <div className="detail-credits">
         {state.settings.showResetCount && <div className="reset-count" title="当前可用的额度重置次数"><span>重置次数</span><strong>{resetCountText(account)}</strong></div>}
         {state.settings.showResetExpiry && showResetExpiry(account) &&
@@ -188,7 +193,7 @@ function Detail({ state }: { state: Snapshot }) {
   </div>;
 }
 function Menu({ state }: { state: Snapshot }) {
-  return <div className="menu shell" role="menu" onPointerEnter={() => window.desktop.menuHover(true)} onPointerLeave={() => window.desktop.menuHover(false)}>
+  return <div className="menu shell" role="menu">
     <button role="menuitem" onClick={() => window.desktop.menuAction('refresh')}><RefreshCw size={15}/>刷新额度</button>
     <button role="menuitemcheckbox" aria-checked={state.visible} onClick={() => window.desktop.menuAction('visibility')}>
       {state.visible ? <Eye size={15}/> : <EyeOff size={15} />}{state.visible ? '隐藏浮球' : '显示浮球'}</button>
@@ -196,6 +201,9 @@ function Menu({ state }: { state: Snapshot }) {
     <button role="menuitem" onClick={() => window.desktop.menuAction('settings')}><Settings2 size={15}/>设置</button>
     <button role="menuitem" onClick={() => window.desktop.menuAction('quit')}><LogOut size={15}/>退出</button>
   </div>;
+}
+function MenuBackdrop() {
+  return <div className="menu-backdrop" onPointerDown={() => window.desktop.dismissMenu()}/>;
 }
 
 type Tab = 'display' | 'refresh' | 'style' | 'connection' | 'accounts';
@@ -211,9 +219,11 @@ function Settings({ state }: { state: Snapshot }) {
     return <label className="setting-row"><span>{label}</span><input key={`${key}-${state.settings[key]}`} type="checkbox" defaultChecked={Boolean(state.settings[key])}
       onChange={event => { const target = event.currentTarget, checked = target.checked; void update({ [key]: checked }).then(ok => { if (!ok) target.checked = !checked; }); }}/></label>;
   }
-  function number(label: string, key: 'barWidth' | 'nameWidth' | 'topWidth' | 'sideWidth' | 'refreshSeconds' | 'rotateSeconds' | 'fontSize' | 'countdownFontSize', min: number, max: number | undefined, unit: string) {
+  function number(label: string, key: 'barWidth' | 'nameWidth' | 'topWidth' | 'sideWidth' | 'concurrencyWidth' | 'refreshSeconds' | 'rotateSeconds' | 'fontSize' | 'countdownFontSize', min: number, max: number | undefined, unit: string) {
     return <label className="setting-row"><span>{label}</span><div className="number-field"><input key={`${key}-${state.settings[key]}`} type="number" min={min} max={max} defaultValue={state.settings[key]}
-      onBlur={event => { const value = Number(event.target.value); if (Number.isInteger(value) && value >= min && (max === undefined || value <= max)) void update({ [key]: value }); else { event.target.value = String(state.settings[key]); setMessage(`${label}范围：${min}${max === undefined ? ' 以上' : `–${max}`}`); } }}
+      onChange={event => { event.currentTarget.dataset.dirty = 'true'; }}
+      onBlur={event => { if (event.currentTarget.dataset.dirty !== 'true') return; delete event.currentTarget.dataset.dirty;
+        const value = Number(event.target.value); if (Number.isInteger(value) && value >= min && (max === undefined || value <= max)) void update({ [key]: value }); else { event.target.value = String(state.settings[key]); setMessage(`${label}范围：${min}${max === undefined ? ' 以上' : `–${max}`}`); } }}
       onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); }}/><span>{unit}</span></div></label>;
   }
   function choice(label: string, value: string, options: [string, string][], key: keyof Settings) {
@@ -264,6 +274,7 @@ function Settings({ state }: { state: Snapshot }) {
         {number('名称宽度', 'nameWidth', 1, undefined, 'px')}
         {number('顶部 / 底部宽度', 'topWidth', 1, undefined, 'px')}
         {number('两侧贴边宽度', 'sideWidth', 1, undefined, 'px')}
+        {number('并发卡片宽度', 'concurrencyWidth', 1, undefined, 'px')}
         {number('重置倒计时字号', 'countdownFontSize', 1, undefined, 'px')}
         <div className="style-group-label">进度状态色</div>
         {paletteSamples.map(([key, name, sample]) => <div className="color-row" key={key}>
@@ -310,6 +321,6 @@ function Settings({ state }: { state: Snapshot }) {
 function App() {
   const state = useSnapshot();
   return view === 'floating' || view === 'snap-preview' ? <Floating state={state} ghost={view === 'snap-preview'}/> : view === 'detail' ? <Detail state={state}/>
-    : view === 'menu' ? <Menu state={state}/> : <Settings state={state}/>;
+    : view === 'menu' ? <Menu state={state}/> : view === 'menu-backdrop' ? <MenuBackdrop/> : <Settings state={state}/>;
 }
 createRoot(document.getElementById('root')!).render(<App/>);

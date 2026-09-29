@@ -53,8 +53,7 @@ input, select { color: var(--text); }
 @container (max-width: 52px) { .meter-tagged .meter-value { padding-right: 2px; text-align: right; font-size: 9px; } }
 .meter-fill { position: absolute; inset: 0 auto 0 0; overflow: hidden; min-width: 0; }
 .meter-foreground { z-index: 2; }
-.meter.has-concurrency .meter-value { line-height: 15px; }
-.meter-concurrency { position: absolute; z-index: 3; left: 0; bottom: 0; max-width: 100%; padding: 0 3px; border-radius: 0 3px 0 3px; background: #e2e9e5; color: #42584d; font-size: 8px; font-weight: 600; line-height: 9px; white-space: nowrap; overflow: hidden; font-variant-numeric: tabular-nums; pointer-events: none; }
+.concurrency-card { flex: 0 0 auto; display: grid; place-items: center; min-width: 0; height: 22px; padding: 0 3px; border: 1px solid #cbd9d0; border-radius: 3px; background: #eaf3ed; color: #315c43; font-size: 10px; font-weight: 600; line-height: 1; white-space: nowrap; overflow: hidden; font-variant-numeric: tabular-nums; }
 .dock-content { display: flex; width: 100%; height: 100%; min-width: 0; }
 .dock-content.horizontal { align-items: center; gap: 4px; }
 .dock-content.vertical { flex-direction: column; align-items: stretch; gap: 0; }
@@ -66,6 +65,7 @@ input, select { color: var(--text); }
 .dock-bars .meter { min-width: 0; flex: 1; }
 .vertical .dock-bars { flex-direction: column; gap: 4px; }
 .vertical .dock-bars .meter { min-height: 22px; flex: 0 0 22px; }
+.vertical .dock-bars .concurrency-card { flex: 0 0 22px; max-width: 100%; align-self: center; }
 .detail { display: flex; flex-direction: column; }
 .detail-head, .settings-head { height: 35px; min-height: 35px; display: flex; align-items: center; justify-content: space-between; padding: 0 6px 0 12px; border-bottom: 1px solid var(--line); }
 .detail-head strong { font-size: min(var(--ui-size), 13px); font-weight: 600; }
@@ -79,13 +79,13 @@ input, select { color: var(--text); }
 .detail-title > span, .detail-sub, .detail-credits, .detail-foot { font-size: min(var(--ui-size), 11px); color: var(--muted); }
 .detail-sub { margin-top: 2px; overflow-wrap: anywhere; }
 .subscription-plan { color: var(--text); }
-.detail-windows { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 8px; }
+.detail-progress { display: flex; align-items: flex-start; gap: 6px; margin-top: 8px; }
+.detail-windows { flex: 1; min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .detail-windows.single { grid-template-columns: minmax(0, 1fr); }
 .detail-windows .meter { height: 28px; line-height: 28px; }
 .detail-windows .meter-value { line-height: 28px; }
-.detail-windows .meter.has-concurrency .meter-value { line-height: 19px; }
+.detail-progress .concurrency-card { height: 28px; }
 .meter-countdown { position: absolute; z-index: 3; right: 0; bottom: 0; max-width: 68%; padding: 0 3px; border-radius: 3px 0 3px 0; background: #e2e9e5; color: #42584d; font-size: var(--countdown-size, 8px); font-weight: 600; line-height: 1.35; white-space: nowrap; overflow: hidden; font-variant-numeric: tabular-nums; pointer-events: none; }
-.meter:has(.meter-countdown) .meter-concurrency { max-width: 32%; }
 .status-switch { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; min-width: 0; padding: 2px 3px; border: 0; border-radius: 3px; background: transparent; font-size: 11px; color: var(--muted); }
 .status-switch:hover { background: var(--hover); }
 .switch-track { display: flex; align-items: center; width: 27px; height: 15px; border-radius: 9px; padding: 2px; background: #aeb8b3; transition: background .15s; }
@@ -104,6 +104,7 @@ input, select { color: var(--text); }
 .empty-note { padding: 16px 12px; color: var(--muted); }
 .error { color: var(--danger) !important; }
 .menu { padding: 5px; display: flex; flex-direction: column; }
+.menu-backdrop { width: 100%; height: 100%; background: transparent; }
 .menu button { height: 32px; min-height: 32px; width: 100%; display: flex; align-items: center; gap: 9px; padding: 0 8px; border: 0; border-radius: 3px; background: transparent; text-align: left; }
 .menu button:hover { background: var(--hover); }
 .menu svg { flex: 0 0 auto; }

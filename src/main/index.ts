@@ -17,15 +17,15 @@ if (!single) app.quit();
 
 let store: Store, config: Configuration, controller: Controller, floating: BrowserWindow;
 let detail: BrowserWindow | null = null, settings: BrowserWindow | null = null, menu: BrowserWindow | null = null;
-let snapPreview: BrowserWindow | null = null, tray: Tray;
+let snapPreview: BrowserWindow | null = null, menuBackdrop: BrowserWindow | null = null, tray: Tray;
 let edge: Edge = null, rotatingIndex = 0, rotatingPeriod: Period = 'five', visible = true, overFloating = false, overDetail = false;
-let snapPreviewEdge: Edge = null, menuFromTray = false, menuLeaveTimer: NodeJS.Timeout | null = null;
+let snapPreviewEdge: Edge = null, menuFromTray = false;
 let dragging = false, dragTimer: NodeJS.Timeout | null = null, leaveTimer: NodeJS.Timeout | null = null, hoverTimer: NodeJS.Timeout | null = null;
 let dragOrigin: { native: Electron.Point; bounds: Electron.Rectangle; offsetX: number; offsetY: number; pointerX: number; pointerY: number } | null = null;
 let rotationTimer: NodeJS.Timeout, nextRotation = 0, opacityTimer: NodeJS.Timeout | null = null;
 let currentOpacity = 1;
 
-function url(window: BrowserWindow, view: 'floating' | 'detail' | 'settings' | 'menu' | 'snap-preview'): void {
+function url(window: BrowserWindow, view: 'floating' | 'detail' | 'settings' | 'menu' | 'menu-backdrop' | 'snap-preview'): void {
   if (process.env.ELECTRON_RENDERER_URL) void window.loadURL(`${process.env.ELECTRON_RENDERER_URL}?view=${view}`);
   else void window.loadFile(path.join(__dirname, '../renderer/index.html'), { query: { view } });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -43,6 +43,7 @@ function senderView(event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent):
   if (sender === detail?.webContents) return 'detail';
   if (sender === settings?.webContents) return 'settings';
   if (sender === menu?.webContents) return 'menu';
+  if (sender === menuBackdrop?.webContents) return 'menu-backdrop';
   if (sender === snapPreview?.webContents) return 'snap-preview';
   return null;
 }
@@ -190,13 +191,21 @@ function hover(surface: 'floating' | 'detail', inside: boolean): void {
   applyOpacity();
 }
 function closeMenu(dismissOverflow = false): void {
-  if (menuLeaveTimer) { clearTimeout(menuLeaveTimer); menuLeaveTimer = null; }
   if (dismissOverflow && menuFromTray && menu?.isVisible() && !menu.isFocused()) menu.focus();
-  menu?.hide(); menuFromTray = false;
+  menu?.hide(); menuBackdrop?.hide(); menuFromTray = false;
+}
+function showMenuBackdrop(x: number, y: number): void {
+  if (!menuBackdrop || menuBackdrop.isDestroyed()) {
+    menuBackdrop = makeWindow(1, 1);
+    url(menuBackdrop, 'menu-backdrop');
+    menuBackdrop.on('closed', () => { menuBackdrop = null; });
+  }
+  menuBackdrop.setBounds(screen.getDisplayNearestPoint({ x, y }).workArea);
+  menuBackdrop.showInactive();
+  menuBackdrop.moveTop();
 }
 function openMenu(x: number, y: number, fromTray = false): void {
   if (fromTray && menu?.isVisible() && menuFromTray) { closeMenu(true); return; }
-  if (menuLeaveTimer) { clearTimeout(menuLeaveTimer); menuLeaveTimer = null; }
   menuFromTray = fromTray;
   if (!menu || menu.isDestroyed()) {
     menu = makeWindow(176, 164, true);
@@ -206,8 +215,11 @@ function openMenu(x: number, y: number, fromTray = false): void {
   }
   const work = screen.getDisplayNearestPoint({ x, y }).workArea;
   menu.setBounds(clampRect({ x, y, width: 176, height: 164 }, work));
-  if (fromTray) menu.showInactive();
-  else { menu.show(); menu.focus(); }
+  if (fromTray) {
+    showMenuBackdrop(x, y); menu.showInactive(); menu.moveTop();
+    setTimeout(() => { if (menuFromTray && menu?.isVisible()) menu.moveTop(); }, 60);
+  }
+  else { menuBackdrop?.hide(); menu.show(); menu.focus(); }
   publish();
 }
 function openSettings(): void {
@@ -289,16 +301,12 @@ function setupIpc(): void {
   ipcMain.on('hover', (event, surface: 'floating' | 'detail', inside: boolean) => {
     if (senderView(event) === surface) hover(surface, inside);
   });
-  ipcMain.on('context-menu', (event, x: number, y: number) => {
+  ipcMain.on('context-menu', (event, x: number, y: number, fromTray = false) => {
     if (senderView(event) !== 'floating') return;
-    overFloating = false; hideDetail(); openMenu(x, y);
+    overFloating = false; hideDetail(); openMenu(x, y, fromTray === true);
   });
   ipcMain.on('menu:action', (event, action: 'settings' | 'refresh' | 'visibility' | 'quit') => { if (senderView(event) === 'menu') menuAction(action); });
-  ipcMain.on('menu:hover', (event, inside: boolean) => {
-    if (senderView(event) !== 'menu' || !menuFromTray) return;
-    if (menuLeaveTimer) clearTimeout(menuLeaveTimer);
-    menuLeaveTimer = inside ? null : setTimeout(() => { if (!menu?.isFocused()) closeMenu(true); }, 400);
-  });
+  ipcMain.on('menu:dismiss', event => { if (senderView(event) === 'menu-backdrop') closeMenu(); });
   ipcMain.on('settings:close', event => { if (senderView(event) === 'settings') settings?.hide(); });
 }
 
@@ -344,6 +352,6 @@ app.whenReady().then(() => {
   void controller.start().then(() => { if (controller.state.connection.status === 'disconnected' && !config.settings.demo) openSettings(); });
 });
 app.on('before-quit', () => {
-  for (const timer of [dragTimer, opacityTimer, leaveTimer, hoverTimer, rotationTimer, menuLeaveTimer]) if (timer) clearInterval(timer);
+  for (const timer of [dragTimer, opacityTimer, leaveTimer, hoverTimer, rotationTimer]) if (timer) clearInterval(timer);
   controller?.dispose();
 });

@@ -14,6 +14,7 @@ export class Store implements SessionVault {
     try {
       const raw = JSON.parse(readFileSync(this.configPath, 'utf8'));
       const parsed = settingsSchema.parse({ ...defaults, ...raw.settings,
+        topWidth: raw.layoutVersion === 3 || raw.settings?.topWidth !== 178 ? raw.settings?.topWidth ?? defaults.topWidth : 160,
         summary: ['worst', 'both'].includes(raw.settings?.summary) ? 'rotate' : raw.settings?.summary ?? defaults.summary,
         showResetExpiry: raw.settings?.showResetExpiry ?? raw.settings?.showResetTime ?? defaults.showResetExpiry });
       const settings = raw.paletteVersion === 2 ? parsed : migrateLegacyPalette(parsed);
@@ -27,7 +28,7 @@ export class Store implements SessionVault {
   }
   saveConfig(value: Configuration): void {
     const temporary = this.configPath + '.tmp';
-    writeFileSync(temporary, JSON.stringify({ ...value, paletteVersion: 2 }, null, 2));
+    writeFileSync(temporary, JSON.stringify({ ...value, paletteVersion: 2, layoutVersion: 3 }, null, 2));
     renameSync(temporary, this.configPath);
   }
   save(value: SavedSession): void {

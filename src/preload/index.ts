@@ -19,9 +19,9 @@ const api: DesktopAPI = {
   drag: (start: boolean, x?: number, y?: number) => ipcRenderer.send('drag', start, x, y),
   dragMove: (x, y) => ipcRenderer.send('drag:move', x, y),
   hover: (surface, inside) => ipcRenderer.send('hover', surface, inside),
-  openContextMenu: (x, y) => ipcRenderer.send('context-menu', x, y),
+  openContextMenu: (x, y, fromTray = false) => ipcRenderer.send('context-menu', x, y, fromTray),
   menuAction: action => ipcRenderer.send('menu:action', action),
-  menuHover: inside => ipcRenderer.send('menu:hover', inside),
+  dismissMenu: () => ipcRenderer.send('menu:dismiss'),
   closeSettings: () => ipcRenderer.send('settings:close')
 };
 contextBridge.exposeInMainWorld('desktop', api);

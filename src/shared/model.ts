@@ -5,7 +5,7 @@ export const settingsSchema = z.object({
   showResetCount: z.boolean(), showResetExpiry: z.boolean(), showStatusToggle: z.boolean(), showConcurrency: z.boolean(), autoCollapse: z.boolean(),
   summary: z.enum(['rotate', 'five', 'seven']), barWidth: z.number().int().positive(),
   nameWidth: z.number().int().positive(), topWidth: z.number().int().positive(),
-  sideWidth: z.number().int().positive(), autoRefresh: z.boolean(),
+  sideWidth: z.number().int().positive(), concurrencyWidth: z.number().int().positive(), autoRefresh: z.boolean(),
   refreshSeconds: z.number().int().min(5).max(3600), rotateSeconds: z.number().int().min(2).max(60),
   fadeInactive: z.boolean(), inactiveOpacity: z.number().int().min(20).max(100),
   normalColor: z.string().regex(/^#[0-9a-f]{6}$/i), warningColor: z.string().regex(/^#[0-9a-f]{6}$/i),
@@ -18,7 +18,7 @@ export const settingsSchema = z.object({
 export type Settings = z.infer<typeof settingsSchema>;
 export const defaults: Settings = {
   metric: 'used', showFive: true, showSeven: true, showResetCount: true, showResetExpiry: true, showStatusToggle: false, showConcurrency: false, autoCollapse: true, summary: 'rotate', barWidth: 68,
-  nameWidth: 62, topWidth: 178, sideWidth: 64, autoRefresh: true, refreshSeconds: 60, rotateSeconds: 4,
+  nameWidth: 62, topWidth: 160, sideWidth: 64, concurrencyWidth: 36, autoRefresh: true, refreshSeconds: 60, rotateSeconds: 4,
   fadeInactive: true, inactiveOpacity: 65, normalColor: '#22c55e', warningColor: '#f59e0b',
   criticalColor: '#ef4444', textOutline: false, fontSize: 12, countdownFontSize: 8, fontBold: false, fontName: '', rememberSession: true,
   selectedIds: [1, 2], aliases: {}, demo: true
@@ -58,9 +58,9 @@ export interface DesktopAPI {
   drag(start: boolean, x?: number, y?: number): void;
   dragMove(x: number, y: number): void;
   hover(surface: 'floating' | 'detail', inside: boolean): void;
-  openContextMenu(x: number, y: number): void;
+  openContextMenu(x: number, y: number, fromTray?: boolean): void;
   menuAction(action: 'settings' | 'refresh' | 'visibility' | 'quit'): void;
-  menuHover(inside: boolean): void;
+  dismissMenu(): void;
   closeSettings(): void;
 }
 export function alias(account: Account, settings: Settings): string {
@@ -141,7 +141,9 @@ export function emptyQuota(account: Account): Quota {
 }
 export function resetCountdown(resetsAt: number | null, now = Date.now()): string {
   if (resetsAt === null || !Number.isFinite(resetsAt)) return '--';
-  const seconds = Math.max(0, Math.ceil((resetsAt - now) / 1000));
+  const remainingMs = Math.max(0, resetsAt - now);
+  const seconds = Math.ceil(remainingMs / 1000);
+  if (remainingMs < 60000) return `${Math.min(59, seconds)}s`;
   if (seconds >= 86400) {
     const days = Math.floor(seconds / 86400), hours = Math.floor(seconds % 86400 / 3600);
     return `${days}d${hours ? `${hours}h` : ''}`;
@@ -150,9 +152,5 @@ export function resetCountdown(resetsAt: number | null, now = Date.now()): strin
     const hours = Math.floor(seconds / 3600), minutes = Math.floor(seconds % 3600 / 60);
     return `${hours}h${minutes ? `${minutes}m` : ''}`;
   }
-  if (seconds >= 60) {
-    const minutes = Math.floor(seconds / 60), remaining = seconds % 60;
-    return `${minutes}m${remaining ? `${remaining}s` : ''}`;
-  }
-  return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m`;
 }

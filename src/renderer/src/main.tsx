@@ -84,7 +84,9 @@ function Meter({ quota, settings, label, period, countdown }: { quota: QuotaWind
 function ConcurrencyCard({ account, settings }: { account: Quota; settings: Settings }) {
   if (!settings.showConcurrency) return null;
   const value = `${account.currentConcurrency ?? '--'}/${account.concurrency ?? '--'}`;
-  return <span className="concurrency-card" style={{ width: settings.concurrencyWidth }} title={`当前并发 / 上限 ${value}`} aria-label={`并发 ${value}`}>{value}</span>;
+  const usage = account.currentConcurrency ?? 0;
+  const status = account.concurrency && usage >= account.concurrency ? 'full' : usage > 0 ? 'in-use' : 'idle';
+  return <span className={`concurrency-card ${status}`} style={{ width: settings.concurrencyWidth }} title={`当前并发 / 上限 ${value}`} aria-label={`并发 ${value}`}>{value}</span>;
 }
 function useSnapshot() {
   const [state, setState] = useState<Snapshot>(demoState);

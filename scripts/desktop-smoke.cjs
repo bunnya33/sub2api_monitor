@@ -14,6 +14,7 @@ const path = require('node:path');
   const widthTrace = [];
   const requests = [];
   let resetCount = 2, resetExpiry = new Date(Date.now() + 3 * 86400000).toISOString(), subscriptionExpiry = '2026-10-01T00:00:00Z';
+  let claudeConcurrency = 1, openaiConcurrency = 2;
   let accountStatus = 'active', rejectStatus = false;
   const statusEdits = [];
   const fixture = http.createServer(async (request, response) => {
@@ -26,8 +27,8 @@ const path = require('node:path');
     else if (request.url === '/api/v1/auth/login/2fa') { assert.equal(parsed.totp_code, '123456'); data = { access_token: 'access', refresh_token: 'private-refresh-token', expires_in: 3600 }; }
     else if (request.url === '/api/v1/auth/me') data = { role: 'admin', email: 'admin@example.com' };
     else if (request.url?.startsWith('/api/v1/admin/accounts?')) data = { items: [
-      { id: 1, name: 'Real Claude', platform: 'anthropic', type: 'oauth', status: 'active', concurrency: 10, current_concurrency: 1, credentials: { plan_type: 'plus' } },
-      { id: 2, name: 'Real OpenAI', platform: 'openai', type: 'oauth', status: accountStatus, concurrency: 5, current_concurrency: 2, credentials: { plan_type: 'pro_5x', subscription_expires_at: subscriptionExpiry } } ], total: 2 };
+      { id: 1, name: 'Real Claude', platform: 'anthropic', type: 'oauth', status: 'active', concurrency: 10, current_concurrency: claudeConcurrency, credentials: { plan_type: 'plus' } },
+      { id: 2, name: 'Real OpenAI', platform: 'openai', type: 'oauth', status: accountStatus, concurrency: 5, current_concurrency: openaiConcurrency, credentials: { plan_type: 'pro_5x', subscription_expires_at: subscriptionExpiry } } ], total: 2 };
     else if (request.url === '/api/v1/admin/accounts/2' && request.method === 'PUT') {
       assert.deepEqual(parsed, { status: accountStatus === 'active' ? 'inactive' : 'active' });
       if (rejectStatus) { response.writeHead(500, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ code: 500, message: '拒绝切换' })); return; }
@@ -371,11 +372,23 @@ const path = require('node:path');
     await concurrencyToggle.check();
     await detail.waitForFunction(() => document.querySelectorAll('.concurrency-card').length === 2);
     assert.deepEqual(await detail.locator('.concurrency-card').allTextContents(), ['1/10', '2/5']);
+    assert.deepEqual(await detail.locator('.concurrency-card').evaluateAll(elements => elements.map(element => ({
+      background: getComputedStyle(element).backgroundColor, color: getComputedStyle(element).color
+    }))), [{ background: 'rgb(254, 249, 195)', color: 'rgb(161, 98, 7)' }, { background: 'rgb(254, 249, 195)', color: 'rgb(161, 98, 7)' }]);
     assert.equal((await detail.locator('.concurrency-card').first().boundingBox()).width, 36);
     assert.equal(await detail.locator('.meter .concurrency-card').count(), 0);
     assert.equal(await floating.locator('.dock-bars > .concurrency-card').count(), 1);
+    claudeConcurrency = 0; openaiConcurrency = 5;
+    await floating.evaluate(() => window.desktop.refresh());
+    await detail.waitForFunction(() => [...document.querySelectorAll('.concurrency-card')].map(element => element.textContent).join(',') === '0/10,5/5');
+    assert.deepEqual(await detail.locator('.concurrency-card').evaluateAll(elements => elements.map(element => ({
+      background: getComputedStyle(element).backgroundColor, color: getComputedStyle(element).color
+    }))), [{ background: 'rgb(243, 244, 246)', color: 'rgb(75, 85, 99)' }, { background: 'rgb(254, 226, 226)', color: 'rgb(185, 28, 28)' }]);
+    claudeConcurrency = 1; openaiConcurrency = 2;
+    await floating.evaluate(() => window.desktop.refresh());
+    await detail.waitForFunction(() => [...document.querySelectorAll('.concurrency-card')].map(element => element.textContent).join(',') === '1/10,2/5');
     assert.equal(await detail.locator('.meter-countdown').first().evaluate(element => getComputedStyle(element).fontSize), '11px');
-    checks.push('account concurrency comes from the server list and appears once per account after its bars');
+    checks.push('account concurrency appears once per account and uses sub2api idle, in-use and full colors');
     const secondsBefore = await detail.locator('.meter-countdown').first().textContent();
     await detail.waitForFunction(before => document.querySelector('.meter-countdown')?.textContent !== before, secondsBefore, { timeout: 3000 });
     assert.match(await detail.locator('.meter-countdown').first().textContent(), /^\d+m$/);

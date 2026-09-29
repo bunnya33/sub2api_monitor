@@ -17,7 +17,7 @@
 
 管理员接口使用 `Authorization: Bearer <access_token>`。普通推理 Key 不适用。响应外层采用 sub2api 的 `{code, message, data}`；错误响应与 HTTP 状态都要处理。
 
-账号列表响应包含 `items`、`total`、`page`、`page_size` 等分页信息。提取 `id`、`name`、`platform`、`type`、`status` 和脱敏 `credentials.plan_type`、`credentials.subscription_expires_at`（影子账号回退到 `parent_plan_type`、`parent_subscription_expires_at`），只保留订阅字段，不保存完整 `credentials` 或写入日志。每轮刷新重新读取账号信息，使订阅、到期时间及状态随服务端更新。订阅到期时间不使用账号的 `expires_at` 或 OAuth 令牌到期时间替代。档位用于 5 小时额度的显示规则；缺少档位时不推断账号为 Plus 或 Pro。HTTPS 使用正常证书校验，HTTP 请求不跟随重定向。
+账号列表响应包含 `items`、`total`、`page`、`page_size` 等分页信息。提取 `id`、`name`、`platform`、`type`、`status`、`concurrency`、`current_concurrency` 和脱敏 `credentials.plan_type`、`credentials.subscription_expires_at`（影子账号回退到 `parent_plan_type`、`parent_subscription_expires_at`），不保存完整 `credentials` 或写入日志。`current_concurrency` 是 Redis 中的当前请求数，`concurrency` 是账号上限；两者来自同一个 `lite=true` 列表响应，缺失时显示 `--`。每轮刷新重新读取账号信息，使并发、订阅、到期时间及状态随服务端更新。订阅到期时间不使用账号的 `expires_at` 或 OAuth 令牌到期时间替代。档位用于 5 小时额度的显示规则；缺少档位时不推断账号为 Plus 或 Pro。HTTPS 使用正常证书校验，HTTP 请求不跟随重定向。
 
 0.2.8 使用单账号接口，当前客户端不请求新版批量接口。单账号信息包含 `source`、`updated_at`、`five_hour`、`seven_day`。各窗口的 `utilization` 是已用百分比，`resets_at` 是重置时间，`remaining_seconds` 是服务端给出的剩余秒数。
 

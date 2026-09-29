@@ -29,8 +29,13 @@ describe('compact quota display', () => {
     expect(size(defaults, [pro], null, false)).toEqual({ width: 150, height: 36 });
     expect(size(defaults, [plus, pro], null, false)).toEqual({ width: 224, height: 64 });
     expect(size({ ...defaults, showSeven: false }, [plus, pro], null, false)).toEqual({ width: 150, height: 64 });
-    expect(size({ ...defaults, summary: 'both' }, [plus, pro], 'left', true, 0).height).toBe(78);
-    expect(size({ ...defaults, summary: 'both' }, [plus, pro], 'left', true, 1).height).toBe(52);
+    expect(summaryPeriods(plus, defaults)).toEqual(['five']);
+    expect(summaryPeriods(plus, defaults, 'seven')).toEqual(['seven']);
+    expect(summaryPeriods(pro, defaults, 'five')).toEqual(['seven']);
+    expect(size(defaults, [plus, pro], 'left', true, 0).height).toBe(52);
+    expect(size(defaults, [plus, pro], 'left', true, 1).height).toBe(52);
+    expect(size({ ...defaults, barWidth: 1, nameWidth: 1 }, [plus], null, false).width).toBe(29);
+    expect(size({ ...defaults, sideWidth: 1 }, [plus], 'left', true).width).toBe(1);
   });
   it('uses account alias without changing the server account name', () => {
     const settings = { ...defaults, aliases: { '7': '主力号' } };
@@ -42,7 +47,7 @@ describe('compact quota display', () => {
     const settings = { ...defaults, metric: 'remaining' as const };
     expect(percent(quota.seven, settings)).toBe('16%');
     expect(color(quota.seven!.used, settings)).toBe(settings.criticalColor);
-    expect(summaryPeriods(quota, settings)).toEqual(['seven']);
+    expect(summaryPeriods(quota, settings, 'seven')).toEqual(['seven']);
   });
   it('derives readable text from each progress color', () => {
     expect(defaults.textOutline).toBe(false);
@@ -79,11 +84,13 @@ describe('compact quota display', () => {
   it('formats the detail reset badge through day, hour and second boundaries', () => {
     const now = 1_000_000;
     expect(resetCountdown(null, now)).toBe('--');
-    expect(resetCountdown(now + (3 * 86400 + 2 * 3600) * 1000, now)).toBe('03d02h');
-    expect(resetCountdown(now + (2 * 3600 + 13 * 60) * 1000, now)).toBe('02h13m');
-    expect(resetCountdown(now + 185000, now)).toBe('03m05s');
-    expect(resetCountdown(now + 59000, now)).toBe('00m59s');
-    expect(resetCountdown(now - 1000, now)).toBe('00m00s');
+    expect(resetCountdown(now + (5 * 86400 + 20 * 3600) * 1000, now)).toBe('5d20h');
+    expect(resetCountdown(now + (86400 + 5 * 3600) * 1000, now)).toBe('1d5h');
+    expect(resetCountdown(now + 5 * 3600000, now)).toBe('5h');
+    expect(resetCountdown(now + (4 * 3600 + 3 * 60) * 1000, now)).toBe('4h3m');
+    expect(resetCountdown(now + 185000, now)).toBe('3m5s');
+    expect(resetCountdown(now + 59000, now)).toBe('59s');
+    expect(resetCountdown(now - 1000, now)).toBe('0s');
   });
 });
 
@@ -99,6 +106,15 @@ describe('multi-display work area geometry', () => {
     expect(rect.x).toBeGreaterThanOrEqual(work.x);
     expect(rect.x + rect.width).toBeLessThanOrEqual(work.x + work.width);
     expect(rect.y + rect.height).toBeLessThanOrEqual(work.y + work.height);
+  });
+  it('keeps detail off the floating window at the bottom-right corner', () => {
+    const work = { x: 0, y: 0, width: 1920, height: 1040 };
+    const ball = { x: 1620, y: 940, width: 224, height: 64 };
+    const rect = detailRect(ball, work, 2);
+    const overlapWidth = Math.max(0, Math.min(rect.x + rect.width, ball.x + ball.width) - Math.max(rect.x, ball.x));
+    const overlapHeight = Math.max(0, Math.min(rect.y + rect.height, ball.y + ball.height) - Math.max(rect.y, ball.y));
+    expect(overlapWidth * overlapHeight).toBe(0);
+    expect(rect.x + rect.width).toBeLessThanOrEqual(ball.x - 8);
   });
   it('shrinks the detail when an account has no reset cards', () => {
     const withCards = { ...quota, platform: 'openai', resetCredits: { available: 1, nearestExpiresAt: Date.now() + 86400000 } };

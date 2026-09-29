@@ -13,7 +13,7 @@ const response = (data: unknown, status = 200) => new Response(JSON.stringify({ 
 
 describe('account detail refresh', () => {
   it('refreshes subscription metadata and reset counts, retains the old count on failure, and clears unknown results', async () => {
-    let plan = 'plus', expiry = '2026-10-01T00:00:00Z', count = 2, cardExpiry = '2026-10-03T00:00:00Z', used = 32, status = 'active';
+    let plan = 'plus', expiry = '2026-10-01T00:00:00Z', count = 2, cardExpiry = '2026-10-03T00:00:00Z', used = 32, status = 'active', currentConcurrency = 1;
     let counterStatus = 200, counterMissing = false;
     let rejectStatus = false;
     const controller = new Controller({ ...defaults, demo: false, autoRefresh: false }, new MemoryVault(), () => {}, async (url, init) => {
@@ -26,7 +26,7 @@ describe('account detail refresh', () => {
         return response({ status });
       }
       if (path === '/api/v1/admin/accounts') return response({ items: [
-        { id: 1, name: 'OpenAI', platform: 'openai', type: 'oauth', status, credentials: { plan_type: plan, subscription_expires_at: expiry } }
+        { id: 1, name: 'OpenAI', platform: 'openai', type: 'oauth', status, concurrency: 10, current_concurrency: currentConcurrency, credentials: { plan_type: plan, subscription_expires_at: expiry } }
       ], total: 1 });
       if (path.endsWith('/usage')) return response({ five_hour: { utilization: used }, seven_day: { utilization: 58 } });
       if (path.endsWith('/quota')) return response(counterMissing ? {} : {
@@ -37,8 +37,10 @@ describe('account detail refresh', () => {
     try {
       await controller.login({ server: 'https://example.invalid', email: 'admin@example.com', password: 'secret' });
       expect(controller.state.quotas[0].resetCredits).toEqual({ available: 2, nearestExpiresAt: Date.parse(cardExpiry) });
-      plan = 'pro_5x'; expiry = '2026-10-02T00:00:00Z'; count = 1; cardExpiry = '2026-10-04T00:00:00Z';
+      expect(controller.state.quotas[0].currentConcurrency).toBe(1);
+      plan = 'pro_5x'; expiry = '2026-10-02T00:00:00Z'; count = 1; cardExpiry = '2026-10-04T00:00:00Z'; currentConcurrency = 3;
       await controller.refresh();
+      expect(controller.state.quotas[0].currentConcurrency).toBe(3);
       expect(controller.state.available[0].planType).toBe('pro_5x');
       expect(controller.state.quotas[0].subscriptionExpiresAt).toBe(Date.parse(expiry));
       expect(controller.state.quotas[0].resetCredits).toEqual({ available: 1, nearestExpiresAt: Date.parse(cardExpiry) });

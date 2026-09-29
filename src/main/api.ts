@@ -2,7 +2,8 @@ import { z } from 'zod';
 import { emptyQuota, type Account, type LoginInput, type Quota, type QuotaWindow, type ResetCredits } from '../shared/model';
 
 const accountSchema = z.object({ id: z.number().int().positive(), name: z.string(), platform: z.string(), type: z.string(), status: z.string().default('active'),
-  credentials: z.record(z.string(), z.unknown()).nullish(), parent_plan_type: z.string().nullish(), parent_subscription_expires_at: z.string().nullish() });
+  credentials: z.record(z.string(), z.unknown()).nullish(), parent_plan_type: z.string().nullish(), parent_subscription_expires_at: z.string().nullish(),
+  concurrency: z.number().int().nonnegative().nullish(), current_concurrency: z.number().int().nonnegative().nullish() });
 const tokenSchema = z.object({ access_token: z.string().min(1), refresh_token: z.string().optional(), expires_in: z.number().optional() });
 const userSchema = z.object({ role: z.string(), email: z.string().optional() });
 export interface SavedSession { server: string; email: string; refreshToken: string }
@@ -137,6 +138,7 @@ export class Sub2ApiClient {
           ? item.credentials.subscription_expires_at : item.parent_subscription_expires_at;
         const expiryTime = expires ? Date.parse(expires) : NaN;
         return { id: item.id, name: item.name, platform: item.platform, type: item.type, status: item.status,
+          concurrency: item.concurrency ?? null, currentConcurrency: item.current_concurrency ?? null,
           planType: typeof item.credentials?.plan_type === 'string' && item.credentials.plan_type.trim() ? item.credentials.plan_type.trim() : item.parent_plan_type || undefined,
           subscriptionExpiresAt: Number.isFinite(expiryTime) ? expiryTime : null };
       }));

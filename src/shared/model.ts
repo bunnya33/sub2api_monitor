@@ -2,30 +2,32 @@ import { z } from 'zod';
 
 export const settingsSchema = z.object({
   metric: z.enum(['used', 'remaining']), showFive: z.boolean(), showSeven: z.boolean(),
-  showResetCount: z.boolean(), showResetExpiry: z.boolean(), showStatusToggle: z.boolean(), autoCollapse: z.boolean(),
-  summary: z.enum(['worst', 'both', 'five', 'seven']), barWidth: z.number().int().min(40).max(240),
-  nameWidth: z.number().int().min(36).max(200), topWidth: z.number().int().min(120).max(400),
-  sideWidth: z.number().int().min(48).max(240), autoRefresh: z.boolean(),
+  showResetCount: z.boolean(), showResetExpiry: z.boolean(), showStatusToggle: z.boolean(), showConcurrency: z.boolean(), autoCollapse: z.boolean(),
+  summary: z.enum(['rotate', 'five', 'seven']), barWidth: z.number().int().positive(),
+  nameWidth: z.number().int().positive(), topWidth: z.number().int().positive(),
+  sideWidth: z.number().int().positive(), autoRefresh: z.boolean(),
   refreshSeconds: z.number().int().min(5).max(3600), rotateSeconds: z.number().int().min(2).max(60),
   fadeInactive: z.boolean(), inactiveOpacity: z.number().int().min(20).max(100),
   normalColor: z.string().regex(/^#[0-9a-f]{6}$/i), warningColor: z.string().regex(/^#[0-9a-f]{6}$/i),
   criticalColor: z.string().regex(/^#[0-9a-f]{6}$/i), textOutline: z.boolean(), fontSize: z.number().int().min(10).max(20),
+  countdownFontSize: z.number().int().positive(),
   fontBold: z.boolean(), fontName: z.string().max(260), rememberSession: z.boolean(),
   selectedIds: z.array(z.number().int().positive()).max(100), aliases: z.record(z.string(), z.string().max(40)),
   demo: z.boolean()
 });
 export type Settings = z.infer<typeof settingsSchema>;
 export const defaults: Settings = {
-  metric: 'used', showFive: true, showSeven: true, showResetCount: true, showResetExpiry: true, showStatusToggle: false, autoCollapse: true, summary: 'worst', barWidth: 68,
+  metric: 'used', showFive: true, showSeven: true, showResetCount: true, showResetExpiry: true, showStatusToggle: false, showConcurrency: false, autoCollapse: true, summary: 'rotate', barWidth: 68,
   nameWidth: 62, topWidth: 178, sideWidth: 64, autoRefresh: true, refreshSeconds: 60, rotateSeconds: 4,
   fadeInactive: true, inactiveOpacity: 65, normalColor: '#22c55e', warningColor: '#f59e0b',
-  criticalColor: '#ef4444', textOutline: false, fontSize: 12, fontBold: false, fontName: '', rememberSession: true,
+  criticalColor: '#ef4444', textOutline: false, fontSize: 12, countdownFontSize: 8, fontBold: false, fontName: '', rememberSession: true,
   selectedIds: [1, 2], aliases: {}, demo: true
 };
 export type Edge = 'left' | 'right' | 'top' | 'bottom' | null;
 export type Period = 'five' | 'seven';
 export interface Rect { x: number; y: number; width: number; height: number }
-export interface Account { id: number; name: string; platform: string; type: string; status: string; planType?: string; subscriptionExpiresAt?: number | null }
+export interface Account { id: number; name: string; platform: string; type: string; status: string; planType?: string; subscriptionExpiresAt?: number | null;
+  concurrency?: number | null; currentConcurrency?: number | null }
 export interface QuotaWindow { used: number; resetsAt: number | null }
 export interface ResetCredits { available: number; nearestExpiresAt: number | null }
 export interface Quota extends Account {
@@ -37,7 +39,7 @@ export interface Connection { status: 'demo' | 'disconnected' | 'authenticating'
 export interface Snapshot {
   settings: Settings; connection: Connection; available: Account[]; quotas: Quota[];
   busy: boolean; lastRefresh: number | null; nextRefresh: number | null; error: string | null;
-  edge: Edge; collapsed: boolean; rotatingIndex: number; visible: boolean;
+  edge: Edge; collapsed: boolean; rotatingIndex: number; rotatingPeriod: Period; visible: boolean;
 }
 export type Result<T = void> = { ok: true; value: T } | { ok: false; error: string };
 export const loginSchema = z.object({ server: z.string().min(1).max(2048), email: z.email(), password: z.string().min(1).max(4096) });
@@ -128,11 +130,11 @@ export function visiblePeriods(account: Account, settings: Settings): Period[] {
   if (settings.showSeven) periods.push('seven');
   return periods;
 }
-export function summaryPeriods(account: Quota, settings: Settings): Period[] {
+export function summaryPeriods(account: Quota, settings: Settings, rotatingPeriod: Period = 'five'): Period[] {
   const available = visiblePeriods(account, settings);
-  if (available.length < 2 || settings.summary === 'both') return available;
-  if (settings.summary !== 'worst') return available.includes(settings.summary) ? [settings.summary] : available;
-  return [(account.five?.used ?? -1) >= (account.seven?.used ?? -1) ? 'five' : 'seven'];
+  if (!available.length) return [];
+  const preferred = settings.summary === 'rotate' ? rotatingPeriod : settings.summary;
+  return [available.includes(preferred) ? preferred : available[0]];
 }
 export function emptyQuota(account: Account): Quota {
   return { ...account, five: null, seven: null, source: 'unknown', updatedAt: null, fetchedAt: null, error: null, resetCredits: null, resetCreditsError: null };
@@ -140,8 +142,17 @@ export function emptyQuota(account: Account): Quota {
 export function resetCountdown(resetsAt: number | null, now = Date.now()): string {
   if (resetsAt === null || !Number.isFinite(resetsAt)) return '--';
   const seconds = Math.max(0, Math.ceil((resetsAt - now) / 1000));
-  const two = (value: number) => String(value).padStart(2, '0');
-  if (seconds >= 86400) return `${two(Math.floor(seconds / 86400))}d${two(Math.floor(seconds % 86400 / 3600))}h`;
-  if (seconds >= 3600) return `${two(Math.floor(seconds / 3600))}h${two(Math.floor(seconds % 3600 / 60))}m`;
-  return `${two(Math.floor(seconds / 60))}m${two(seconds % 60)}s`;
+  if (seconds >= 86400) {
+    const days = Math.floor(seconds / 86400), hours = Math.floor(seconds % 86400 / 3600);
+    return `${days}d${hours ? `${hours}h` : ''}`;
+  }
+  if (seconds >= 3600) {
+    const hours = Math.floor(seconds / 3600), minutes = Math.floor(seconds % 3600 / 60);
+    return `${hours}h${minutes ? `${minutes}m` : ''}`;
+  }
+  if (seconds >= 60) {
+    const minutes = Math.floor(seconds / 60), remaining = seconds % 60;
+    return `${minutes}m${remaining ? `${remaining}s` : ''}`;
+  }
+  return `${seconds}s`;
 }

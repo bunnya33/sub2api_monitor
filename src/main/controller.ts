@@ -4,9 +4,9 @@ import { ApiError, normalizeServer, Sub2ApiClient, type Fetcher, type SessionVau
 
 export function demoQuotas(now = Date.now()): Quota[] {
   return [
-    { id: 1, name: '示例 C1', platform: 'anthropic', type: 'oauth', status: 'active', planType: 'plus', subscriptionExpiresAt: now + 1209600000, resetCredits: null,
+    { id: 1, name: '示例 C1', platform: 'anthropic', type: 'oauth', status: 'active', planType: 'plus', subscriptionExpiresAt: now + 1209600000, concurrency: 10, currentConcurrency: 1, resetCredits: null,
       five: { used: 32, resetsAt: now + 8280000 }, seven: { used: 58, resetsAt: now + 280800000 } },
-    { id: 2, name: '示例 O2', platform: 'openai', type: 'oauth', status: 'active', planType: 'pro_5x', subscriptionExpiresAt: now + 1814400000,
+    { id: 2, name: '示例 O2', platform: 'openai', type: 'oauth', status: 'active', planType: 'pro_5x', subscriptionExpiresAt: now + 1814400000, concurrency: 5, currentConcurrency: 2,
       resetCredits: { available: 2, nearestExpiresAt: now + 259200000 }, five: { used: 19, resetsAt: now + 14700000 }, seven: { used: 84, resetsAt: now + 129600000 } }
   ].map(a => ({ ...a, source: 'demo', updatedAt: now, fetchedAt: now, error: null, resetCreditsError: null }));
 }
@@ -21,7 +21,7 @@ export class Controller extends EventEmitter {
   private timer: NodeJS.Timeout;
   constructor(settings: Settings, private vault: SessionVault, private save: () => void, private fetcher?: Fetcher, server = '', email = '') {
     super();
-    this.state = { settings, connection: { status: settings.demo ? 'demo' : 'disconnected', server, email, message: settings.demo ? '演示数据' : '未登录' }, available: [], quotas: [], busy: false, lastRefresh: null, nextRefresh: null, error: null, edge: null, collapsed: false, rotatingIndex: 0, visible: true };
+    this.state = { settings, connection: { status: settings.demo ? 'demo' : 'disconnected', server, email, message: settings.demo ? '演示数据' : '未登录' }, available: [], quotas: [], busy: false, lastRefresh: null, nextRefresh: null, error: null, edge: null, collapsed: false, rotatingIndex: 0, rotatingPeriod: 'five', visible: true };
     if (settings.demo) this.enableDemo();
     this.timer = setInterval(() => { if (this.state.nextRefresh && Date.now() >= this.state.nextRefresh && !this.state.busy) void this.refresh().catch(() => {}); }, 500);
   }

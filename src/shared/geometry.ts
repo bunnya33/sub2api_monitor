@@ -1,11 +1,11 @@
-import { defaults, summaryPeriods, visiblePeriods, type Edge, type Quota, type Rect, type Settings } from './model';
+import { defaults, summaryPeriods, visiblePeriods, type Edge, type Period, type Quota, type Rect, type Settings } from './model';
 
 // Electron's screen workArea, cursor point and BrowserWindow bounds share logical DIP coordinates.
-export function size(settings: Settings, accounts: Quota[], edge: Edge, collapsed: boolean, index = 0): { width: number; height: number } {
+export function size(settings: Settings, accounts: Quota[], edge: Edge, collapsed: boolean, index = 0, rotatingPeriod: Period = 'five'): { width: number; height: number } {
   if (collapsed && edge) {
     if (edge === 'top' || edge === 'bottom') return { width: settings.topWidth, height: 32 };
     const account = accounts[index % Math.max(1, accounts.length)];
-    const count = Math.max(1, account ? summaryPeriods(account, settings).length : 1);
+    const count = Math.max(1, account ? summaryPeriods(account, settings, rotatingPeriod).length : 1);
     return { width: settings.sideWidth, height: 30 + count * 22 + (count - 1) * 4 };
   }
   const count = Math.max(0, ...accounts.map(account => visiblePeriods(account, settings).length));
@@ -44,6 +44,8 @@ export function detailRect(ball: Rect, work: Rect, accounts: Quota[] | number, s
     { x: ball.x, y: ball.y + ball.height + 8, width, height },
     { x: ball.x, y: ball.y - height - 8, width, height }
   ];
-  const match = options.find(r => r.x >= work.x && r.y >= work.y && r.x + width <= work.x + work.width && r.y + height <= work.y + work.height);
-  return clampRect(match ?? options[0], { x: work.x + 8, y: work.y + 8, width: work.width - 16, height: work.height - 16 });
+  const inset = { x: work.x + 8, y: work.y + 8, width: work.width - 16, height: work.height - 16 };
+  const overlap = (rect: Rect) => Math.max(0, Math.min(rect.x + rect.width, ball.x + ball.width) - Math.max(rect.x, ball.x))
+    * Math.max(0, Math.min(rect.y + rect.height, ball.y + ball.height) - Math.max(rect.y, ball.y));
+  return options.map(option => clampRect(option, inset)).reduce((best, current) => overlap(current) < overlap(best) ? current : best);
 }

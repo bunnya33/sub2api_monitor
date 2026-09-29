@@ -17,7 +17,7 @@ describe('sub2api 0.2.8 session and usage', () => {
       if (route.endsWith('/login')) return response({ access_token: 'access' });
       if (route.endsWith('/me')) return response({ role: 'admin' });
       return response({ items: [
-        { id: 1, name: 'Plus', platform: 'openai', type: 'oauth', status: 'active', credentials: { plan_type: 'plus', subscription_expires_at: '2026-10-01T00:00:00Z', expires_at: '2026-09-30T00:00:00Z', access_token: 'must-not-copy' } },
+        { id: 1, name: 'Plus', platform: 'openai', type: 'oauth', status: 'active', concurrency: 10, current_concurrency: 1, credentials: { plan_type: 'plus', subscription_expires_at: '2026-10-01T00:00:00Z', expires_at: '2026-09-30T00:00:00Z', access_token: 'must-not-copy' } },
         { id: 2, name: 'Pro', platform: 'openai', type: 'oauth', status: 'active', credentials: { plan_type: 'pro_5x', expires_at: '2026-09-30T00:00:00Z' } },
         { id: 3, name: 'Shadow', platform: 'openai', type: 'oauth', status: 'active', parent_plan_type: 'max_20x', parent_subscription_expires_at: '2026-10-02T00:00:00Z' },
         { id: 4, name: 'Unknown', platform: 'anthropic', type: 'oauth', status: 'active', credentials: { subscription_expires_at: 'invalid' } }
@@ -27,6 +27,8 @@ describe('sub2api 0.2.8 session and usage', () => {
     const accounts = await client.listAccounts();
     expect(accounts.map(item => item.planType)).toEqual(['plus', 'pro_5x', 'max_20x', undefined]);
     expect(accounts.map(item => item.subscriptionExpiresAt)).toEqual([Date.parse('2026-10-01T00:00:00Z'), null, Date.parse('2026-10-02T00:00:00Z'), null]);
+    expect([accounts[0].currentConcurrency, accounts[0].concurrency]).toEqual([1, 10]);
+    expect([accounts[1].currentConcurrency, accounts[1].concurrency]).toEqual([null, null]);
     expect(JSON.stringify(accounts)).not.toContain('must-not-copy');
     expect(accounts.every(item => !('credentials' in item))).toBe(true);
   });

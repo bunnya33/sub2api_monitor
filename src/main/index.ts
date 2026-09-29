@@ -3,7 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'nod
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { clampRect, detailRect, size, snapEdge } from '../shared/geometry';
-import { loginSchema, settingsSchema, type Edge, type LoginInput, type Rect, type Settings, type Snapshot } from '../shared/model';
+import { loginSchema, settingsSchema, type Edge, type LoginInput, type Period, type Rect, type Settings, type Snapshot } from '../shared/model';
 import { Controller } from './controller';
 import { Store, type Configuration } from './store';
 
@@ -18,7 +18,7 @@ if (!single) app.quit();
 let store: Store, config: Configuration, controller: Controller, floating: BrowserWindow;
 let detail: BrowserWindow | null = null, settings: BrowserWindow | null = null, menu: BrowserWindow | null = null;
 let snapPreview: BrowserWindow | null = null, tray: Tray;
-let edge: Edge = null, rotatingIndex = 0, visible = true, overFloating = false, overDetail = false;
+let edge: Edge = null, rotatingIndex = 0, rotatingPeriod: Period = 'five', visible = true, overFloating = false, overDetail = false;
 let snapPreviewEdge: Edge = null, menuFromTray = false, menuLeaveTimer: NodeJS.Timeout | null = null;
 let dragging = false, dragTimer: NodeJS.Timeout | null = null, leaveTimer: NodeJS.Timeout | null = null, hoverTimer: NodeJS.Timeout | null = null;
 let dragOrigin: { native: Electron.Point; bounds: Electron.Rectangle; offsetX: number; offsetY: number; pointerX: number; pointerY: number } | null = null;
@@ -54,6 +54,7 @@ function publish(): void {
   controller.state.edge = edge;
   controller.state.collapsed = !!(edge && controller.state.settings.autoCollapse);
   controller.state.rotatingIndex = rotatingIndex;
+  controller.state.rotatingPeriod = rotatingPeriod;
   controller.state.visible = visible;
   for (const window of [floating, detail, settings, menu]) if (window && !window.isDestroyed()) window.webContents.send('state', controller.state);
   if (snapPreview && !snapPreview.isDestroyed()) snapPreview.webContents.send('state', previewState());
@@ -70,7 +71,7 @@ function resizeFloating(position?: { x: number; y: number }): void {
   if (!floating || floating.isDestroyed()) return;
   const old = floating.getBounds();
   const accounts = controller.state.quotas;
-  const target = size(controller.state.settings, accounts, edge, !!(edge && controller.state.settings.autoCollapse), rotatingIndex);
+  const target = size(controller.state.settings, accounts, edge, !!(edge && controller.state.settings.autoCollapse), rotatingIndex, rotatingPeriod);
   const proposed = { x: position?.x ?? old.x, y: position?.y ?? old.y, ...target };
   const work = displayFor(proposed).workArea;
   floating.setBounds(clampRect(proposed, work, edge));
@@ -100,7 +101,7 @@ function moveFloatingDuringDrag(x: number, y: number): void {
     url(snapPreview, 'snap-preview');
     snapPreview.on('closed', () => { snapPreview = null; });
   }
-  const target = size(controller.state.settings, controller.state.quotas, candidate, controller.state.settings.autoCollapse, rotatingIndex);
+  const target = size(controller.state.settings, controller.state.quotas, candidate, controller.state.settings.autoCollapse, rotatingIndex, rotatingPeriod);
   snapPreview.setBounds(clampRect({ ...contained, ...target }, work, candidate));
   if (!snapPreview.isVisible()) snapPreview.showInactive();
   if (changed) publish();
@@ -333,7 +334,11 @@ app.whenReady().then(() => {
     if (!edge || !controller.state.settings.autoCollapse || dragging || overFloating || overDetail || !floating.isVisible()) return;
     if (Date.now() < nextRotation) return;
     nextRotation = Date.now() + controller.state.settings.rotateSeconds * 1000;
-    if (controller.state.quotas.length > 1) { rotatingIndex = (rotatingIndex + 1) % controller.state.quotas.length; resizeFloating(); }
+    if (controller.state.quotas.length) {
+      rotatingIndex = (rotatingIndex + 1) % controller.state.quotas.length;
+      if (rotatingIndex === 0) rotatingPeriod = rotatingPeriod === 'five' ? 'seven' : 'five';
+      resizeFloating();
+    }
   }, 250);
   nextRotation = Date.now() + controller.state.settings.rotateSeconds * 1000;
   void controller.start().then(() => { if (controller.state.connection.status === 'disconnected' && !config.settings.demo) openSettings(); });

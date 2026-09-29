@@ -11,19 +11,20 @@ const preview = !window.desktop;
 if (preview) document.body.classList.add('browser-preview');
 const demoState: Snapshot = { settings: defaults, connection: { status: 'demo', server: '', email: '', message: '演示数据' },
   available: [], quotas: [], busy: false, lastRefresh: null, nextRefresh: null, error: null,
-  edge: null, collapsed: false, rotatingIndex: 0, visible: true };
+  edge: null, collapsed: false, rotatingIndex: 0, rotatingPeriod: 'five', visible: true };
 function browserPreview(): DesktopAPI {
   const now = Date.now();
   const quotas: Quota[] = [
-    { id: 1, name: '示例 C1', platform: 'anthropic', type: 'oauth', status: 'active', planType: 'plus', subscriptionExpiresAt: now + 1209600000, resetCredits: null,
+    { id: 1, name: '示例 C1', platform: 'anthropic', type: 'oauth', status: 'active', planType: 'plus', subscriptionExpiresAt: now + 1209600000, concurrency: 10, currentConcurrency: 1, resetCredits: null,
       five: { used: 32, resetsAt: now + 8280000 }, seven: { used: 58, resetsAt: now + 280800000 } },
-    { id: 2, name: '示例 O2', platform: 'openai', type: 'oauth', status: 'active', planType: 'pro_5x', subscriptionExpiresAt: now + 1814400000,
+    { id: 2, name: '示例 O2', platform: 'openai', type: 'oauth', status: 'active', planType: 'pro_5x', subscriptionExpiresAt: now + 1814400000, concurrency: 5, currentConcurrency: 2,
       resetCredits: { available: 2, nearestExpiresAt: now + 259200000 }, five: { used: 19, resetsAt: now + 14700000 }, seven: { used: 84, resetsAt: now + 129600000 } }
   ].map(value => ({ ...value, source: 'demo', updatedAt: now, fetchedAt: now, error: null, resetCreditsError: null }));
   let settings: Settings;
   try {
     const saved = JSON.parse(localStorage.getItem('quota-preview-settings') || '{}');
-    settings = { ...defaults, ...saved, showResetExpiry: saved.showResetExpiry ?? saved.showResetTime ?? defaults.showResetExpiry };
+    settings = { ...defaults, ...saved, summary: ['worst', 'both'].includes(saved.summary) ? 'rotate' : saved.summary ?? defaults.summary,
+      showResetExpiry: saved.showResetExpiry ?? saved.showResetTime ?? defaults.showResetExpiry };
     if (!localStorage.getItem('quota-preview-palette-v2')) {
       settings = migrateLegacyPalette(settings);
       localStorage.setItem('quota-preview-settings', JSON.stringify(settings));
@@ -63,18 +64,22 @@ const subscription = (value?: string) => {
   const plan = value.trim().toLowerCase().replace(/_/g, ' ');
   return plan.replace(/\b(plus|pro|max|free|team|business|enterprise|ultra)\b/g, name => name[0].toUpperCase() + name.slice(1));
 };
-function Meter({ quota, settings, label, period, countdown }: { quota: QuotaWindow | null; settings: Settings; label: string; period?: Period; countdown?: string }) {
+function Meter({ quota, settings, label, period, countdown, account }: { quota: QuotaWindow | null; settings: Settings; label: string; period?: Period; countdown?: string; account?: Quota }) {
   const value = quota ? Math.max(0, Math.min(100, metric(quota.used, settings))) : 0;
   const fill = quota ? color(quota.used, settings) : '#aeb8b3';
   const textColor = quota ? ink(fill) : undefined;
   const text = percent(quota, settings);
-  return <div className={`meter ${settings.textOutline ? 'outlined' : ''} ${period ? 'meter-tagged' : ''}`} style={{ '--meter-outline': settings.textOutline && textColor ? outlineInk(textColor) : undefined } as React.CSSProperties}
+  const concurrency = settings.showConcurrency && account ? `${account.currentConcurrency ?? '--'}/${account.concurrency ?? '--'}` : null;
+  return <div className={`meter ${settings.textOutline ? 'outlined' : ''} ${period ? 'meter-tagged' : ''} ${concurrency ? 'has-concurrency' : ''}`}
+    style={{ '--meter-outline': settings.textOutline && textColor ? outlineInk(textColor) : undefined,
+      '--countdown-size': `${settings.countdownFontSize}px` } as React.CSSProperties}
     role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100}
     aria-valuenow={quota ? value : undefined} aria-valuetext={quota ? text : '暂无数据'} title={`${label} · ${text}`}>
     <span className="meter-value" style={{ color: quota && !needsLightInk(fill) ? textColor : undefined }}>{text}</span>
     {quota && <><span className="meter-fill" style={{ width: `${value}%`, backgroundColor: fill }}/>
       <span className="meter-value meter-foreground" style={{ color: textColor, clipPath: `inset(0 ${100 - value}% 0 0)` }}>{text}</span></>}
     {period && <span className={`meter-tag ${period}`} aria-hidden="true">{period === 'five' ? '5h' : '7d'}</span>}
+    {concurrency && <span className="meter-concurrency" title={`当前并发 / 上限 ${concurrency}`}>{concurrency}</span>}
     {countdown !== undefined && <span className="meter-countdown" aria-label={`距离重置 ${countdown}`}>{countdown}</span>}
   </div>;
 }
@@ -104,7 +109,7 @@ function useSnapshot() {
 }
 function Floating({ state, ghost = false }: { state: Snapshot; ghost?: boolean }) {
   const settings = state.settings, active = state.quotas[state.rotatingIndex % Math.max(1, state.quotas.length)];
-  const dockPeriods = active ? summaryPeriods(active, settings) : [];
+  const dockPeriods = active ? summaryPeriods(active, settings, state.rotatingPeriod) : [];
   const pressed = useRef(false);
   function down(event: React.PointerEvent<HTMLDivElement>) {
     if (event.button !== 0) return;
@@ -121,18 +126,18 @@ function Floating({ state, ghost = false }: { state: Snapshot; ghost?: boolean }
   }
   const collapsed = state.collapsed && !!state.edge;
   return <div className={`floating ${collapsed ? `docked ${state.edge}` : ''} ${ghost ? 'snap-ghost' : ''}`} style={{ '--bar-width': `${settings.barWidth}px`,
-    ...(preview ? size(settings, state.quotas, state.edge, collapsed, state.rotatingIndex) : {}) } as React.CSSProperties} onPointerDown={ghost ? undefined : down} onPointerMove={ghost ? undefined : event => { if (pressed.current) window.desktop.dragMove(event.screenX, event.screenY); }} onPointerUp={ghost ? undefined : up} onLostPointerCapture={ghost ? undefined : () => { if (pressed.current) { pressed.current = false; window.desktop.drag(false); } }}
+    ...(preview ? size(settings, state.quotas, state.edge, collapsed, state.rotatingIndex, state.rotatingPeriod) : {}) } as React.CSSProperties} onPointerDown={ghost ? undefined : down} onPointerMove={ghost ? undefined : event => { if (pressed.current) window.desktop.dragMove(event.screenX, event.screenY); }} onPointerUp={ghost ? undefined : up} onLostPointerCapture={ghost ? undefined : () => { if (pressed.current) { pressed.current = false; window.desktop.drag(false); } }}
     onPointerEnter={ghost ? undefined : () => window.desktop.hover('floating', true)} onPointerLeave={ghost ? undefined : () => window.desktop.hover('floating', false)}
     onContextMenu={ghost ? undefined : event => { event.preventDefault(); window.desktop.openContextMenu(event.screenX, event.screenY); }}>
     {collapsed && active ? <div className={`dock-content ${state.edge === 'left' || state.edge === 'right' ? 'vertical' : 'horizontal'}`}>
       <span className="dock-name" title={alias(active, settings)}>{shortName(active, settings, state.rotatingIndex)}</span>
-      <div className="dock-bars">{dockPeriods.length ? dockPeriods.map(period => <Meter key={period} quota={active[period]} settings={settings} period={period}
+      <div className="dock-bars">{dockPeriods.length ? dockPeriods.map(period => <Meter key={period} quota={active[period]} settings={settings} period={period} account={active}
         label={`${alias(active, settings)} · ${period === 'five' ? '5 小时' : '7 天'}`} />) : <span className="dock-empty">--</span>}</div>
     </div> : <div className="floating-rows">
       {state.quotas.length ? state.quotas.map(account => <div className="floating-row" key={account.id}>
         <span className="account-name" title={account.name + (settings.aliases[String(account.id)] ? ` · 别名 ${alias(account, settings)}` : '') + (account.error ? ` · ${account.error}` : '')}
           style={{ width: settings.nameWidth }}>{alias(account, settings)}</span>
-        {visiblePeriods(account, settings).map(period => <Meter key={period} quota={account[period]} settings={settings} period={period}
+        {visiblePeriods(account, settings).map(period => <Meter key={period} quota={account[period]} settings={settings} period={period} account={account}
           label={`${alias(account, settings)} · ${period === 'five' ? '5 小时' : '7 天'}`} />)}
       </div>) : <div className="floating-empty">{state.connection.status === 'authenticating' ? '连接中…' : '未登录'}</div>}
     </div>}
@@ -167,7 +172,7 @@ function Detail({ state }: { state: Snapshot }) {
           </button> : <span>{account.error ? '缓存' : account.status === 'active' ? '可用' : account.status}</span>}</div>
       <div className="detail-sub">{platform(account.platform)} · {account.type} · <span className="subscription-plan">订阅 {subscription(account.planType)} · 到期 {time(account.subscriptionExpiresAt ?? null)}</span></div>
       <div className={`detail-windows ${supportsFive(account) ? '' : 'single'}`}>{(supportsFive(account) ? ['five', 'seven'] as Period[] : ['seven'] as Period[]).map(period => <div key={period}>
-        <Meter quota={account[period]} settings={state.settings} period={period} countdown={resetCountdown(account[period]?.resetsAt ?? null, now)}
+        <Meter quota={account[period]} settings={state.settings} period={period} account={account} countdown={resetCountdown(account[period]?.resetsAt ?? null, now)}
           label={`${alias(account, state.settings)} · ${period === 'five' ? '5 小时' : '7 天'} · ${account[period]?.resetsAt ? `重置于 ${time(account[period]!.resetsAt)}` : '重置时间未知'}`}/>
       </div>)}</div>
       {(state.settings.showResetCount || state.settings.showResetExpiry && showResetExpiry(account)) && <div className="detail-credits">
@@ -206,9 +211,9 @@ function Settings({ state }: { state: Snapshot }) {
     return <label className="setting-row"><span>{label}</span><input key={`${key}-${state.settings[key]}`} type="checkbox" defaultChecked={Boolean(state.settings[key])}
       onChange={event => { const target = event.currentTarget, checked = target.checked; void update({ [key]: checked }).then(ok => { if (!ok) target.checked = !checked; }); }}/></label>;
   }
-  function number(label: string, key: 'barWidth' | 'nameWidth' | 'topWidth' | 'sideWidth' | 'refreshSeconds' | 'rotateSeconds' | 'fontSize', min: number, max: number, unit: string) {
+  function number(label: string, key: 'barWidth' | 'nameWidth' | 'topWidth' | 'sideWidth' | 'refreshSeconds' | 'rotateSeconds' | 'fontSize' | 'countdownFontSize', min: number, max: number | undefined, unit: string) {
     return <label className="setting-row"><span>{label}</span><div className="number-field"><input key={`${key}-${state.settings[key]}`} type="number" min={min} max={max} defaultValue={state.settings[key]}
-      onBlur={event => { const value = Number(event.target.value); if (Number.isInteger(value) && value >= min && value <= max) void update({ [key]: value }); else { event.target.value = String(state.settings[key]); setMessage(`${label}范围：${min}–${max}`); } }}
+      onBlur={event => { const value = Number(event.target.value); if (Number.isInteger(value) && value >= min && (max === undefined || value <= max)) void update({ [key]: value }); else { event.target.value = String(state.settings[key]); setMessage(`${label}范围：${min}${max === undefined ? ' 以上' : `–${max}`}`); } }}
       onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); }}/><span>{unit}</span></div></label>;
   }
   function choice(label: string, value: string, options: [string, string][], key: keyof Settings) {
@@ -235,12 +240,9 @@ function Settings({ state }: { state: Snapshot }) {
         {checkbox('显示重置次数', 'showResetCount')}
         {checkbox('显示最近重置卡到期', 'showResetExpiry')}
         {checkbox('启用账号状态开关', 'showStatusToggle')}
+        {checkbox('显示并发数量', 'showConcurrency')}
         {checkbox('贴边自动收起', 'autoCollapse')}
-        {number('进度条宽度', 'barWidth', 40, 240, 'px')}
-        {number('名称宽度', 'nameWidth', 36, 200, 'px')}
-        {number('顶部 / 底部宽度', 'topWidth', 120, 400, 'px')}
-        {number('两侧贴边宽度', 'sideWidth', 48, 240, 'px')}
-        {choice('贴边摘要', state.settings.summary, [['worst', '最紧张的窗口'], ['both', '5 小时 + 7 天'], ['five', '5 小时'], ['seven', '7 天']], 'summary')}
+        {choice('贴边切换', state.settings.summary, [['five', '仅 5h'], ['seven', '仅 7d'], ['rotate', '5h / 7d 轮播']], 'summary')}
         {checkbox('失焦时半透明', 'fadeInactive')}
         <label className="setting-row"><span>失焦不透明度</span><div className="slider-field"><input type="range" min="20" max="100" value={opacityDraft} disabled={!state.settings.fadeInactive}
           onChange={event => setOpacityDraft(Number(event.target.value))}
@@ -257,6 +259,12 @@ function Settings({ state }: { state: Snapshot }) {
         <div className="actions"><button onClick={() => void window.desktop.refresh()} disabled={state.busy}><RefreshCw size={15}/>立即刷新</button></div>
       </>}
       {tab === 'style' && <>
+        <div className="style-group-label">尺寸</div>
+        {number('进度条宽度', 'barWidth', 1, undefined, 'px')}
+        {number('名称宽度', 'nameWidth', 1, undefined, 'px')}
+        {number('顶部 / 底部宽度', 'topWidth', 1, undefined, 'px')}
+        {number('两侧贴边宽度', 'sideWidth', 1, undefined, 'px')}
+        {number('重置倒计时字号', 'countdownFontSize', 1, undefined, 'px')}
         <div className="style-group-label">进度状态色</div>
         {paletteSamples.map(([key, name, sample]) => <div className="color-row" key={key}>
           <span>{name}</span><input type="color" aria-label={name + '颜色'} value={state.settings[key]} onChange={event => void update({ [key]: event.target.value })}/>

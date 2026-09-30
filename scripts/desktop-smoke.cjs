@@ -10,7 +10,8 @@ async function trayRightClick(electronApp, x, y, count = 1) {
     for (let i = 0; i < count; i++) app.emit('quota:test-tray-right-click', { x, y, width: 24, height: 24 });
   }, { x, y, count });
   for (let i = 0; i < 100; i++) {
-    if (await electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some(window => /[?&]view=menu(?:&|$)/.test(window.webContents.getURL()) && window.isVisible()))) return;
+    if (await electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some(window => /[?&]view=menu(?:&|$)/.test(window.webContents.getURL()) && window.isVisible())))
+      return (await electronApp.windows()).find(window => /[?&]view=menu(?:&|$)/.test(window.url()));
     await new Promise(resolve => setTimeout(resolve, 50));
   }
   throw new Error('Tray menu did not become visible');
@@ -192,6 +193,28 @@ async function trayRightClick(electronApp, x, y, count = 1) {
     await menu.getByRole('menuitem', { name: '设置' }).click();
     const settings = await settingsWindow;
     await settings.waitForSelector('.settings');
+    // The initial click used to be the only menu action tested. Exercise each new opening.
+    for (let cycle = 0; cycle < 3; cycle++) {
+      await settings.evaluate(() => window.desktop.closeSettings());
+      const hideMenu = await trayRightClick(app, 500, 300);
+      await hideMenu.getByRole('menuitemcheckbox', { name: '隐藏浮球' }).click();
+      await floating.waitForFunction(async () => !(await window.desktop.getState()).visible);
+      const showMenu = await trayRightClick(app, 500, 300);
+      await showMenu.getByRole('menuitemcheckbox', { name: '显示浮球' }).click();
+      await floating.waitForFunction(async () => (await window.desktop.getState()).visible);
+      const refreshBefore = (await floating.evaluate(() => window.desktop.getState())).lastRefresh;
+      const refreshMenu = await trayRightClick(app, 500, 300);
+      await refreshMenu.getByRole('menuitem', { name: '刷新额度' }).click();
+      await floating.waitForFunction(async before => {
+        const state = await window.desktop.getState();
+        return !state.busy && state.lastRefresh > before;
+      }, refreshBefore);
+      const settingsMenu = await trayRightClick(app, 500, 300);
+      await settingsMenu.getByRole('menuitem', { name: '设置' }).click();
+      assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(w => /[?&]view=settings(?:&|$)/.test(w.webContents.getURL())).isVisible()), true);
+      assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter(w => /[?&]view=menu(?:&|$)/.test(w.webContents.getURL())).length), 0);
+    }
+    checks.push('settings, hide, show and refresh remain clickable across repeated tray openings');
     const switchFor = label => settings.getByText(label, { exact: true }).locator('..').locator('.el-switch');
     const isSwitchOn = async label => (await switchFor(label).locator('input').getAttribute('aria-checked')) === 'true';
     const setSwitch = async (label, enabled) => { if (await isSwitchOn(label) !== enabled) await switchFor(label).click(); };
@@ -536,8 +559,9 @@ async function trayRightClick(electronApp, x, y, count = 1) {
     await activeApp.evaluate(({ app }) => {
       globalThis.menuLifecycle = [];
       app.on('browser-window-created', (_event, window) => {
-        for (const event of ['ready-to-show', 'show', 'hide']) window.on(event, () => {
-          globalThis.menuLifecycle.push({ id: window.id, event, url: window.webContents.getURL() });
+        for (const event of ['ready-to-show', 'show', 'closed']) window.on(event, () => {
+          const url = event === 'closed' ? globalThis.menuLifecycle.find(item => item.id === window.id)?.url : window.webContents.getURL();
+          globalThis.menuLifecycle.push({ id: window.id, event, url });
         });
       });
     });
@@ -570,24 +594,24 @@ async function trayRightClick(electronApp, x, y, count = 1) {
       external.show(); external.focus();
       globalThis.externalTestWindow = external;
     });
-    await trayMenu.waitForFunction(async () => !(await window.desktop.getState()).busy);
     for (let i = 0; i < 30; i++) {
-      if (!await activeApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(window => /[?&]view=menu(?:&|$)/.test(window.webContents.getURL())).isVisible())) break;
-      await trayMenu.waitForTimeout(50);
+      if (!await activeApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(window => /[?&]view=menu(?:&|$)/.test(window.webContents.getURL()))?.isVisible())) break;
+      await restoredFloat.waitForTimeout(50);
     }
     const afterOutsideClick = await activeApp.evaluate(({ BrowserWindow }, id) => ({
       panel: BrowserWindow.fromId(id)?.isVisible(),
-      menu: BrowserWindow.getAllWindows().find(window => /[?&]view=menu(?:&|$)/.test(window.webContents.getURL()))?.isVisible(),
+      menu: BrowserWindow.getAllWindows().find(window => /[?&]view=menu(?:&|$)/.test(window.webContents.getURL()))?.isVisible() ?? false,
       backdrop: BrowserWindow.getAllWindows().some(window => window.webContents.getURL().includes('view=menu-backdrop'))
     }), fakeOverflow.id);
     assert.deepEqual(afterOutsideClick, { panel: true, menu: false, backdrop: false });
     await activeApp.evaluate(() => globalThis.externalTestWindow.close());
-    await trayMenu.waitForTimeout(100);
-    await trayRightClick(activeApp, fakeOverflow.x, fakeOverflow.y, 2);
-    await trayMenu.waitForTimeout(200);
+    await restoredFloat.waitForTimeout(100);
+    const reopenedTrayMenu = await trayRightClick(activeApp, fakeOverflow.x, fakeOverflow.y, 2);
+    await reopenedTrayMenu.waitForTimeout(200);
     assert.equal(await activeApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(window => /[?&]view=menu(?:&|$)/.test(window.webContents.getURL())).isVisible()), true);
     const reopenLifecycle = await activeApp.evaluate(() => globalThis.menuLifecycle.filter(event => /[?&]view=menu(?:&|$)/.test(event.url)));
-    assert.deepEqual(reopenLifecycle.map(event => event.event), ['ready-to-show', 'show', 'hide', 'show']);
+    assert.deepEqual(reopenLifecycle.map(event => event.event), ['ready-to-show', 'show', 'closed', 'ready-to-show', 'show']);
+    assert.notEqual(reopenLifecycle[0].id, reopenLifecycle[3].id);
     checks.push('duplicate tray open requests do not toggle or flash the popup');
     await activeApp.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)?.close(), fakeOverflow.id);
     checks.push('native foreground changes dismiss the nonactivating menu without a desktop input overlay');
@@ -640,13 +664,58 @@ async function trayRightClick(electronApp, x, y, count = 1) {
     await updateMenu.getByRole('button', { name: '确认' }).click();
     await updateFloat.waitForFunction(async () => (await window.desktop.getState()).update.status === 'downloading');
     await updateFloat.mouse.click(18, 16, { button: 'right' });
-    assert.equal(await activeApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(window => /[?&]view=menu(?:&|$)/.test(window.webContents.getURL())).isVisible()), false);
-    await trayRightClick(activeApp, 500, 300);
-    await updateMenu.getByRole('menuitem', { name: '下载更新 0%' }).waitFor();
-    assert.equal(await updateMenu.locator('.menu.expanded').count(), 0);
-    assert.equal(await updateMenu.locator('.el-popconfirm:visible').count(), 0);
+    assert.equal(await activeApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(window => /[?&]view=menu(?:&|$)/.test(window.webContents.getURL()))?.isVisible() ?? false), false);
+    const downloadMenu = await trayRightClick(activeApp, 500, 300);
+    await downloadMenu.getByRole('menuitem', { name: '下载更新 0%' }).waitFor();
+    assert.equal(await downloadMenu.locator('.menu.expanded').count(), 0);
+    assert.equal(await downloadMenu.locator('.el-popconfirm:visible').count(), 0);
     checks.push('tray menu reopens without a stale update confirmation');
     checks.push('update badge state, balanced menu and Popconfirm gate downloads');
+    await activeApp.close(); activeApp = null;
+    const dpiData = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-fractional-dpi-'));
+    activeApp = await _electron.launch({ executablePath,
+      args: [...(process.env.QUOTA_EXECUTABLE ? [] : [root]), '--force-device-scale-factor=1.75'],
+      env: { ...process.env, QUOTA_DATA_DIR: dpiData } });
+    const dpiFloat = await activeApp.firstWindow();
+    await dpiFloat.waitForSelector('.floating-row');
+    const dpiStart = await activeApp.evaluate(({ BrowserWindow, screen }) => {
+      const ball = BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('view=floating'));
+      const work = screen.getPrimaryDisplay().workArea;
+      ball.setBounds({ x: work.x + 60, y: work.y + 70, width: 224, height: 64 });
+      globalThis.dpiCursor = { x: work.x + 80, y: work.y + 86 };
+      screen.getCursorScreenPoint = () => ({ ...globalThis.dpiCursor });
+      globalThis.dpiMoves = [];
+      const setBounds = ball.setBounds.bind(ball);
+      ball.setBounds = (rect, ...args) => { globalThis.dpiMoves.push(rect); setBounds(rect, ...args); };
+      return { bounds: ball.getBounds(), scaleFactor: screen.getPrimaryDisplay().scaleFactor };
+    });
+    assert.equal(dpiStart.scaleFactor, 1.75);
+    // The regular-DPI checks above cover pointer capture. Drive the same IPC here
+    // to test native movement without CDP's forced-DPI mouse coordinate conversion.
+    await dpiFloat.evaluate(() => window.desktop.drag(true, 80, 86));
+    await dpiFloat.waitForTimeout(50);
+    const dpiTrace = [];
+    // Keep the button down after movement, and then move repeatedly without releasing.
+    for (let step = 0; step < 20; step++) {
+      if (step < 10) await activeApp.evaluate(() => { globalThis.dpiCursor.x += 2; globalThis.dpiCursor.y += 1; });
+      await dpiFloat.waitForTimeout(100);
+      dpiTrace.push(await activeApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('view=floating')).getBounds()));
+    }
+    assert.notEqual(dpiTrace[0].x, dpiStart.bounds.x);
+    // Native physical-pixel rounding can vary by one DIP with position, but must not accumulate.
+    for (const rect of dpiTrace) assert.ok(Math.abs(rect.width - 224) <= 1 && Math.abs(rect.height - 64) <= 1, `175% drag grew: ${JSON.stringify(rect)}`);
+    assert.ok(dpiTrace.slice(10).every(rect => rect.width === dpiTrace[10].width && rect.height === dpiTrace[10].height), 'stationary drag dimensions keep changing');
+    const movesBeforeIdle = await activeApp.evaluate(() => globalThis.dpiMoves.length);
+    await dpiFloat.waitForTimeout(800);
+    assert.equal(await activeApp.evaluate(() => globalThis.dpiMoves.length), movesBeforeIdle, 'stationary drag keeps repositioning the window');
+    assert.ok((await activeApp.evaluate(() => globalThis.dpiMoves)).every(rect => rect.width === 224 && rect.height === 64), 'drag reused rounded native dimensions');
+    await dpiFloat.evaluate(() => window.desktop.drag(false));
+    await dpiFloat.waitForTimeout(100);
+    const dpiReleased = await activeApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('view=floating')).getBounds());
+    assert.ok(Math.abs(dpiReleased.width - 224) <= 1 && Math.abs(dpiReleased.height - 64) <= 1);
+    await dpiFloat.screenshot({ path: path.join(output, 'floating-175-percent.png') });
+    fs.writeFileSync(path.join(output, 'dpi-drag.json'), JSON.stringify({ start: dpiStart, trace: dpiTrace, released: dpiReleased, movesBeforeIdle }, null, 2));
+    checks.push('175% Electron DPI: continuous movement and long press keep logical size, idle drag stops window writes');
     fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks }, null, 2));
     console.log(JSON.stringify({ passed: true, checks }, null, 2));
   } catch (error) {

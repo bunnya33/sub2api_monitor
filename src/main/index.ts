@@ -32,6 +32,7 @@ let edge: Edge = null, rotatingIndex = 0, rotatingPeriod: Period = 'five', visib
 let snapPreviewEdge: Edge = null;
 let dragging = false, dragTimer: NodeJS.Timeout | null = null, leaveTimer: NodeJS.Timeout | null = null, hoverTimer: NodeJS.Timeout | null = null;
 let dragOrigin: { native: Electron.Point; bounds: Electron.Rectangle; offsetX: number; offsetY: number; pointerX: number; pointerY: number } | null = null;
+let dragPosition: Electron.Point | null = null;
 let rotationTimer: NodeJS.Timeout, nextRotation = 0, opacityTimer: NodeJS.Timeout | null = null;
 let currentOpacity = 1;
 
@@ -100,7 +101,13 @@ function hideSnapPreview(): void {
   snapPreview?.hide();
 }
 function moveFloatingDuringDrag(x: number, y: number): void {
-  floating.setPosition(Math.round(x), Math.round(y));
+  if (!dragOrigin) return;
+  const point = { x: Math.round(x), y: Math.round(y) };
+  if (point.x === dragPosition?.x && point.y === dragPosition?.y) return;
+  dragPosition = point;
+  // setPosition reuses rounded native bounds and grows the window at fractional DPI.
+  // Always supply the original logical size, rather than feeding getBounds back in.
+  floating.setBounds({ ...point, width: dragOrigin.bounds.width, height: dragOrigin.bounds.height });
   const rect = floating.getBounds(), work = displayFor(rect).workArea;
   const contained = clampRect(rect, work);
   const candidate = snapEdge(contained, work);
@@ -127,6 +134,7 @@ function stopDrag(): void {
   const work = displayFor(rect).workArea;
   const contained = clampRect(rect, work);
   dragOrigin = null;
+  dragPosition = null;
   hideSnapPreview();
   edge = snapEdge(contained, work);
   resizeFloating({ x: contained.x, y: contained.y });
@@ -146,7 +154,8 @@ function beginDrag(pointerX: number, pointerY: number): void {
       y: Math.round(cursor.y - yRatio * size(controller.state.settings, controller.state.quotas, null, false).height) });
   }
   const expanded = floating.getBounds(), offsetX = cursor.x - expanded.x, offsetY = cursor.y - expanded.y;
-  dragOrigin = { native: cursor, bounds: expanded, offsetX, offsetY, pointerX, pointerY };
+  dragOrigin = { native: cursor, bounds: { ...expanded, ...size(controller.state.settings, controller.state.quotas, null, false) }, offsetX, offsetY, pointerX, pointerY };
+  dragPosition = { x: expanded.x, y: expanded.y };
   dragging = true;
   dragTimer = setInterval(() => {
     if (!dragging) return;
@@ -206,10 +215,11 @@ function closeMenu(): void {
   menuRequest++;
   menuWatchAbort?.abort(); menuWatchAbort = null;
   stopMenuWatch?.(); stopMenuWatch = null;
-  if (menu && !menu.isDestroyed() && menu.isVisible()) {
-    menu.webContents.send('menu:reset');
-    menu.hide();
-  }
+  const closed = menu;
+  menu = null;
+  // A hidden non-activating Chromium window can retain its previous input state.
+  // Each opening starts with fresh native and renderer input/capture state.
+  if (closed && !closed.isDestroyed()) closed.destroy();
   menuExpanded = false;
   menuAnchor = null;
 }
@@ -246,17 +256,16 @@ function ensureMenu(): BrowserWindow {
     const window = menu;
     preparePopup(window);
     window.on('blur', () => {
-      if (window.isFocusable() && !window.webContents.isDevToolsOpened()) closeMenu();
+      if (menu === window && window.isFocusable() && !window.webContents.isDevToolsOpened()) closeMenu();
     });
     window.on('closed', () => {
-      closeMenu();
-      menu = null;
+      if (menu === window) closeMenu();
     });
   }
   return menu;
 }
 async function openMenu(anchor: Electron.Rectangle): Promise<void> {
-  if (menu?.isVisible()) return;
+  if (menu && !menu.isDestroyed()) return; // Also coalesce requests while the popup is loading.
   closeMenu();
   const request = menuRequest;
   const target = ensureMenu();

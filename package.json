@@ -1,6 +1,6 @@
 {
   "name": "sub2api-quota-monitor",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "private": true,
   "description": "Windows floating upstream quota monitor for sub2api",
   "main": "./out/main/index.js",

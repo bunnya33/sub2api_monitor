@@ -2,7 +2,8 @@
 
 ## 当前主线：Electron
 
-- 用户确认改用 Electron + React + TypeScript；WPF 实现保留在当前仓库，并加标签 `wpf-baseline` 指向 `ee75647`。
+- 当前渲染层为 Vue 3 + Element Plus + TypeScript，桌面功能由 Electron 提供；WPF 实现保留在当前仓库，并加标签 `wpf-baseline` 指向 `ee75647`。
+- 设置中的二元选项改为带动画的 Element Plus Switch，选择、数字、滑块、颜色和输入控件统一使用 Element Plus。安装版 Windows 开机自启动默认开启，可在「刷新」页关闭；自动化测试使用隔离数据目录，不修改系统启动项。
 - 实现透明置顶浮球、整块区域拖动、四边吸附、贴边账号轮播、悬停明细和失焦透明度。
 - 拖动进入吸附范围时显示不接收鼠标输入的贴边形态预览，松手后正式吸附；失焦透明度滑块支持连续拖动并在松手后保存。
 - 实现自绘托盘右键菜单、浮球右键菜单及自绘五页设置。账号页支持本地别名；样式页支持名称、进度条与贴边宽度。
@@ -23,7 +24,14 @@
 - Playwright 真实 Electron 窗口验证包括进度条与名称拖动、悬停明细自动收起、透明度滑块连续拖动、字号作用范围、拖动中的吸附预览、贴边与轮播，以及本地模拟服务器的邮箱密码、2FA、管理员和额度流程。
 - `release/corner-tags-build/win-unpacked/Sub2API Quota Monitor.exe` 的打包版本也通过同一套窗口与字体验证。
 - 上一打包目录为 `release/account-details-build/win-unpacked/`；重置信息开关、订阅、缺失字段、重启后的配置恢复均已加入桌面验证。
-- 最新安装包为 `release/v0.2.4/Sub2API Quota Monitor Setup 0.2.4.exe`，同目录的免安装程序通过完整 Electron 窗口测试，覆盖右下角详情避让、最小宽度输入、贴边周期回退/轮播、36 DIP 并发卡片及三档颜色、旧配置迁移、倒计时字号、托盘菜单工作区边界的模拟面板和重启持久化。安装包未签名。
+- 上一安装包为 `release/v0.2.4/Sub2API Quota Monitor Setup 0.2.4.exe`，同目录的免安装程序通过完整 Electron 窗口测试，覆盖右下角详情避让、最小宽度输入、贴边周期回退/轮播、36 DIP 并发卡片及三档颜色、旧配置迁移、倒计时字号、托盘菜单工作区边界的模拟面板和重启持久化。安装包未签名。
+
+## v0.3.0 Vue 3 迁移
+
+- 保留 Electron 主进程的浮球、托盘和多屏逻辑；渲染层改为 Vue 3。设置页和菜单使用 Element Plus 控件，所有设置开关改为带动画的 Switch。
+- Windows 安装版默认开机自启动；「刷新」页可关闭。桌面自动化验证默认值、关闭后的重启持久化与旧配置默认值，测试使用隔离目录，因此未验证真实系统启动项写入。
+- `npm run typecheck`、`npm test`（26 项）、`npm run build` 及开发版和打包版桌面测试通过。截图与报告在 `artifacts/electron-v0.3.0-migration-smoke/` 和 `artifacts/electron-v0.3.0-packaged-smoke/`。
+- 安装包为 `release/v0.3.0/Sub2API Quota Monitor Setup 0.3.0.exe`，同目录保留免安装版。安装包未做数字签名。
 
 Electron 报告和截图：`artifacts/electron-v0.2.4-packaged-smoke/`，更早的报告保留在 `artifacts/electron-v0.2.3-packaged-smoke/`。本机两块屏幕的缩放比例都是 100%，已验证两屏工作区坐标；不同 DPI 的组合、真实服务器及 Windows“更多图标”面板的实际层级、焦点和任务栏行为仍需实机联调。旧 WPF 的验证记录保留在下文。
 

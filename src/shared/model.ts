@@ -5,7 +5,7 @@ export const settingsSchema = z.object({
   showResetCount: z.boolean(), showResetExpiry: z.boolean(), showStatusToggle: z.boolean(), showConcurrency: z.boolean(), autoCollapse: z.boolean(),
   summary: z.enum(['rotate', 'five', 'seven']), barWidth: z.number().int().positive(),
   nameWidth: z.number().int().positive(), topWidth: z.number().int().positive(),
-  sideWidth: z.number().int().positive(), concurrencyWidth: z.number().int().positive(), autoRefresh: z.boolean(),
+  sideWidth: z.number().int().positive(), concurrencyWidth: z.number().int().positive(), autoRefresh: z.boolean(), autoStart: z.boolean(),
   refreshSeconds: z.number().int().min(5).max(3600), rotateSeconds: z.number().int().min(2).max(60),
   fadeInactive: z.boolean(), inactiveOpacity: z.number().int().min(20).max(100),
   normalColor: z.string().regex(/^#[0-9a-f]{6}$/i), warningColor: z.string().regex(/^#[0-9a-f]{6}$/i),
@@ -18,7 +18,7 @@ export const settingsSchema = z.object({
 export type Settings = z.infer<typeof settingsSchema>;
 export const defaults: Settings = {
   metric: 'used', showFive: true, showSeven: true, showResetCount: true, showResetExpiry: true, showStatusToggle: false, showConcurrency: false, autoCollapse: true, summary: 'rotate', barWidth: 68,
-  nameWidth: 62, topWidth: 160, sideWidth: 64, concurrencyWidth: 36, autoRefresh: true, refreshSeconds: 60, rotateSeconds: 4,
+  nameWidth: 62, topWidth: 160, sideWidth: 64, concurrencyWidth: 36, autoRefresh: true, autoStart: true, refreshSeconds: 60, rotateSeconds: 4,
   fadeInactive: true, inactiveOpacity: 65, normalColor: '#22c55e', warningColor: '#f59e0b',
   criticalColor: '#ef4444', textOutline: false, fontSize: 12, countdownFontSize: 8, fontBold: false, fontName: '', rememberSession: true,
   selectedIds: [1, 2], aliases: {}, demo: true

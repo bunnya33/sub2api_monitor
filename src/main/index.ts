@@ -65,6 +65,10 @@ function save(): void {
   config = { ...config, settings: controller.state.settings, server: controller.state.connection.server, email: controller.state.connection.email };
   store.saveConfig(config);
 }
+function configureAutoStart(enabled: boolean): void {
+  if (process.platform !== 'win32' || !app.isPackaged || process.env.QUOTA_DATA_DIR) return;
+  app.setLoginItemSettings({ openAtLogin: enabled, path: process.execPath, args: ['--autostart'] });
+}
 function displayFor(rect: Rect) {
   return screen.getDisplayNearestPoint({ x: Math.round(rect.x + rect.width / 2), y: Math.round(rect.y + rect.height / 2) });
 }
@@ -244,7 +248,8 @@ function setupIpc(): void {
   ipcMain.handle('state:get', event => senderView(event) === 'snap-preview' ? previewState() : senderView(event) ? controller.state : null);
   ipcMain.handle('settings:update', async (event, patch: Partial<Settings>) => {
     if (senderView(event) !== 'settings') return { ok: false, error: '无效窗口' };
-    try { await controller.update(settingsSchema.partial().parse(patch)); resizeFloating(); return { ok: true, value: undefined }; }
+    try { const parsed = settingsSchema.partial().parse(patch); if (parsed.autoStart !== undefined) configureAutoStart(parsed.autoStart);
+      await controller.update(parsed); resizeFloating(); return { ok: true, value: undefined }; }
     catch (error) { return { ok: false, error: error instanceof Error ? error.message : '保存失败' }; }
   });
   ipcMain.handle('auth:login', async (event, input: LoginInput) => {
@@ -313,6 +318,7 @@ function setupIpc(): void {
 app.on('second-instance', () => { if (floating) { visible = true; floating.showInactive(); openSettings(); } });
 app.whenReady().then(() => {
   store = new Store(); config = store.loadConfig();
+  try { configureAutoStart(config.settings.autoStart); } catch (error) { console.error('Unable to configure auto start:', error); }
   protocol.handle('quota-font', request => {
     if (new URL(request.url).host !== 'local' || new URL(request.url).pathname !== '/custom.ttf' || !store.fontFile())
       return new Response('', { status: 404 });

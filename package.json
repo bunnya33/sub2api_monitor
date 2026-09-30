@@ -1,6 +1,6 @@
 {
   "name": "sub2api-quota-monitor",
-  "version": "0.2.4",
+  "version": "0.3.0",
   "private": true,
   "description": "Windows floating upstream quota monitor for sub2api",
   "main": "./out/main/index.js",
@@ -8,7 +8,7 @@
     "postinstall": "node node_modules/electron/install.js",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "vue-tsc --noEmit",
     "test": "vitest run",
     "icons": "node scripts/generate-icons.mjs",
     "test:desktop": "node scripts/desktop-smoke.cjs",
@@ -16,23 +16,22 @@
     "dist:win": "npm run icons && npm run build && electron-builder --win"
   },
   "dependencies": {
-    "lucide-react": "^0.468.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
+    "@element-plus/icons-vue": "^2.3.2",
+    "element-plus": "^2.14.6",
+    "vue": "^3.5.43",
     "zod": "^4.1.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.55.0",
     "@types/node": "^22.15.0",
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
-    "@vitejs/plugin-react": "^4.7.0",
+    "@vitejs/plugin-vue": "^6.0.9",
     "electron": "44.1.1",
     "electron-builder": "^26.0.0",
     "electron-vite": "^4.0.0",
     "sharp": "^0.35.5",
     "typescript": "^5.9.0",
     "vite": "^7.1.0",
-    "vitest": "^5.0.2"
+    "vitest": "^5.0.2",
+    "vue-tsc": "^3.3.11"
   }
 }

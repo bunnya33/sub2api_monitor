@@ -137,9 +137,15 @@ input, select { color: var(--text); }
 .subdued { color: var(--muted); }
 .subdued span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 12px; }
-.actions button, .font-actions button { min-height: 28px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--hover); padding: 4px 9px; }
-.actions button:hover, .font-actions button:hover { background: #e5eee9; }
-.actions button.primary { color: white; background: #263d38; border-color: #263d38; }
+.actions .el-button, .font-actions .el-button { min-height: 28px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border-radius: 4px; padding: 4px 9px; }
+.actions .el-button:not(.el-button--primary), .font-actions .el-button:not(.el-button--primary) { border-color: var(--line); background: var(--hover); color: var(--text); }
+.actions .el-button:not(.el-button--primary):not(.is-disabled):hover, .font-actions .el-button:not(.el-button--primary):not(.is-disabled):hover { background: #e5eee9; }
+.actions .el-button--primary { --el-button-bg-color: #263d38; --el-button-border-color: #263d38; --el-button-text-color: #fff;
+  --el-button-hover-bg-color: #34554d; --el-button-hover-border-color: #34554d; --el-button-hover-text-color: #fff;
+  --el-button-active-bg-color: #1c2e29; --el-button-active-border-color: #1c2e29; --el-button-active-text-color: #fff;
+  --el-button-disabled-bg-color: #e0e6e2; --el-button-disabled-border-color: #d2dbd5; --el-button-disabled-text-color: #506057; }
+.actions .el-button--primary.is-disabled { opacity: 1; }
+.refresh-note { color: var(--muted); font-size: 11px; margin: 2px 0 10px; }
 .style-group-label { color: var(--muted); font-size: 11px; margin: 4px 0 7px; }
 .font-label { margin-top: 20px; padding-top: 11px; border-top: 1px solid var(--line); }
 .color-row { display: grid; grid-template-columns: 116px 30px 78px minmax(0, 1fr); align-items: center; gap: 8px; min-height: 46px; }

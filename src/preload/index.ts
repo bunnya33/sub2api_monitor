@@ -24,6 +24,7 @@ const api: DesktopAPI = {
   menuAction: action => ipcRenderer.send('menu:action', action),
   resizeUpdateMenu: expanded => ipcRenderer.send('menu:resize-update', expanded),
   menuReady: () => ipcRenderer.send('menu:ready'),
+  settingsReady: () => ipcRenderer.send('settings:ready'),
   subscribeMenuReset: listener => {
     const handler = () => listener();
     ipcRenderer.on('menu:reset', handler);

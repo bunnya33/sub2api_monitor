@@ -1,23 +1,25 @@
 import { app } from 'electron';
 import { autoUpdater } from 'electron-updater';
-import type { UpdateState } from '../shared/model';
-
-const CHECK_INTERVAL = 12 * 60 * 60 * 1000;
+import { defaults, type UpdateState } from '../shared/model';
 
 export class Updates {
   state: UpdateState = { status: 'idle', version: null, progress: 0, error: null };
-  private startupTimer: NodeJS.Timeout | null = null;
   private interval: NodeJS.Timeout | null = null;
   private checking = false;
+  private started = false;
+  private stopped = false;
 
-  constructor(private changed: (state: UpdateState) => void, private fixtureVersion?: string) {}
+  constructor(private changed: (state: UpdateState) => void, private fixtureVersion?: string,
+    private checkMinutes = defaults.updateCheckMinutes) {}
 
   start(): void {
+    if (this.started || this.stopped) return;
     if (this.fixtureVersion) {
       this.set({ status: 'available', version: this.fixtureVersion, progress: 0, error: null });
       return;
     }
     if (!app.isPackaged || process.platform !== 'win32') return;
+    this.started = true;
     autoUpdater.autoDownload = false;
     autoUpdater.autoInstallOnAppQuit = false;
     autoUpdater.allowPrerelease = false;
@@ -35,12 +37,23 @@ export class Updates {
       if (this.state.status === 'downloading') this.set({ ...this.state, status: 'available', error: error.message });
       else console.error('Update check failed:', error);
     });
-    this.startupTimer = setTimeout(() => void this.check(), 60_000);
-    this.interval = setInterval(() => void this.check(), CHECK_INTERVAL);
+    this.schedule();
+    void this.check();
+  }
+
+  setCheckInterval(minutes: number): void {
+    if (minutes === this.checkMinutes) return;
+    this.checkMinutes = minutes;
+    if (this.started && !this.stopped) this.schedule();
+  }
+
+  private schedule(): void {
+    if (this.interval) clearInterval(this.interval);
+    this.interval = setInterval(() => void this.check(), this.checkMinutes * 60_000);
   }
 
   async check(): Promise<void> {
-    if (this.checking || this.state.status === 'downloading' || this.state.status === 'downloaded' || !app.isPackaged) return;
+    if (this.stopped || this.checking || this.state.status === 'downloading' || this.state.status === 'downloaded' || !app.isPackaged) return;
     this.checking = true;
     try { await autoUpdater.checkForUpdates(); }
     catch (error) { console.error('Update check failed:', error); }
@@ -62,11 +75,13 @@ export class Updates {
   }
 
   stop(): void {
-    if (this.startupTimer) clearTimeout(this.startupTimer);
+    this.stopped = true;
     if (this.interval) clearInterval(this.interval);
+    this.interval = null;
   }
 
   private set(state: UpdateState): void {
+    if (this.stopped) return;
     this.state = state;
     this.changed(state);
   }

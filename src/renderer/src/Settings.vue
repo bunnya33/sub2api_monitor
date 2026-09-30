@@ -1,15 +1,15 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { ElButton, ElColorPicker, ElInput, ElInputNumber, ElOption, ElPopconfirm, ElSelect, ElSlider, ElSwitch } from 'element-plus';
 import { Close, Delete, Refresh, Upload } from '@element-plus/icons-vue';
 import type { Settings as SettingsData, Snapshot } from '../../shared/model';
-import { platform, resetCountText, supportsResetCards, time } from './runtime';
+import { platform, resetCountText, stateReady, supportsResetCards, time } from './runtime';
 import Meter from './Meter.vue';
 
 const props = defineProps<{ state: Snapshot }>();
 type Tab = 'display' | 'refresh' | 'style' | 'connection' | 'accounts';
 type BooleanKey = { [K in keyof SettingsData]: SettingsData[K] extends boolean ? K : never }[keyof SettingsData];
-type NumberKey = 'barWidth' | 'nameWidth' | 'topWidth' | 'sideWidth' | 'concurrencyWidth' | 'refreshSeconds' | 'rotateSeconds' | 'fontSize' | 'countdownFontSize';
+type NumberKey = 'barWidth' | 'nameWidth' | 'topWidth' | 'sideWidth' | 'concurrencyWidth' | 'refreshSeconds' | 'rotateSeconds' | 'updateCheckMinutes' | 'fontSize' | 'countdownFontSize';
 type ColorKey = 'normalColor' | 'warningColor' | 'criticalColor';
 const tabs: { id: Tab; label: string }[] = [
   { id: 'display', label: '显示' }, { id: 'refresh', label: '刷新' }, { id: 'style', label: '样式' },
@@ -38,7 +38,12 @@ const resetMessage = ref<{ id: number; text: string; error: boolean } | null>(nu
 const aliasDraft = reactive<Record<string, string>>({});
 function syncAccountsVisibility(): void { window.desktop.setAccountsVisible(tab.value === 'accounts' && !document.hidden); }
 watch(tab, syncAccountsVisibility);
-onMounted(() => { document.addEventListener('visibilitychange', syncAccountsVisibility); syncAccountsVisibility(); });
+onMounted(async () => {
+  document.addEventListener('visibilitychange', syncAccountsVisibility); syncAccountsVisibility();
+  await stateReady;
+  await nextTick();
+  window.desktop.settingsReady();
+});
 onUnmounted(() => { document.removeEventListener('visibilitychange', syncAccountsVisibility); window.desktop.setAccountsVisible(false); });
 watch(() => props.state.settings.inactiveOpacity, value => { opacityDraft.value = value; });
 watch(() => [props.state.connection.server, props.state.connection.email], () => {
@@ -139,6 +144,8 @@ const logout = () => void window.desktop.logout();
         <div class="setting-row"><span>自动刷新</span><ElSwitch :model-value="state.settings.autoRefresh" aria-label="自动刷新" @change="value => updateBoolean('autoRefresh', Boolean(value))" /></div>
         <div class="setting-row"><span>数据刷新间隔</span><div class="number-field"><ElInputNumber :model-value="state.settings.refreshSeconds" :min="5" :max="3600" :controls="false" aria-label="数据刷新间隔" @change="value => updateNumber('refreshSeconds', value)" /><span>秒</span></div></div>
         <div class="setting-row"><span>账号轮播间隔</span><div class="number-field"><ElInputNumber :model-value="state.settings.rotateSeconds" :min="2" :max="60" :controls="false" aria-label="账号轮播间隔" @change="value => updateNumber('rotateSeconds', value)" /><span>秒</span></div></div>
+        <div class="setting-row"><span>版本检查间隔</span><div class="number-field"><ElInputNumber :model-value="state.settings.updateCheckMinutes" :min="1" :max="10080" :controls="false" aria-label="版本检查间隔" @change="value => updateNumber('updateCheckMinutes', value)" /><span>分钟</span></div></div>
+        <div class="refresh-note">启动时检查一次，之后按此间隔检查新版本。</div>
         <div class="setting-row subdued"><span>最近刷新</span><span>{{ time(state.lastRefresh) }}</span></div>
         <div class="setting-row subdued"><span>下次刷新</span><span>{{ state.nextRefresh ? time(state.nextRefresh) : '已暂停' }}</span></div>
         <div class="actions"><ElButton :icon="Refresh" :disabled="state.busy" @click="refresh">立即刷新</ElButton></div>

@@ -7,6 +7,7 @@ export const settingsSchema = z.object({
   nameWidth: z.number().int().positive(), topWidth: z.number().int().positive(),
   sideWidth: z.number().int().positive(), concurrencyWidth: z.number().int().positive(), autoRefresh: z.boolean(), autoStart: z.boolean(),
   refreshSeconds: z.number().int().min(5).max(3600), rotateSeconds: z.number().int().min(2).max(60),
+  updateCheckMinutes: z.number().int().min(1).max(10080),
   fadeInactive: z.boolean(), inactiveOpacity: z.number().int().min(20).max(100),
   normalColor: z.string().regex(/^#[0-9a-f]{6}$/i), warningColor: z.string().regex(/^#[0-9a-f]{6}$/i),
   criticalColor: z.string().regex(/^#[0-9a-f]{6}$/i), textOutline: z.boolean(), fontSize: z.number().int().min(10).max(20),
@@ -18,7 +19,7 @@ export const settingsSchema = z.object({
 export type Settings = z.infer<typeof settingsSchema>;
 export const defaults: Settings = {
   metric: 'used', showFive: true, showSeven: true, showResetCount: true, showResetExpiry: true, showStatusToggle: false, showConcurrency: false, autoCollapse: true, summary: 'rotate', barWidth: 68,
-  nameWidth: 62, topWidth: 160, sideWidth: 64, concurrencyWidth: 36, autoRefresh: true, autoStart: true, refreshSeconds: 60, rotateSeconds: 4,
+  nameWidth: 62, topWidth: 160, sideWidth: 64, concurrencyWidth: 36, autoRefresh: true, autoStart: true, refreshSeconds: 60, rotateSeconds: 4, updateCheckMinutes: 10,
   fadeInactive: true, inactiveOpacity: 65, normalColor: '#22c55e', warningColor: '#f59e0b',
   criticalColor: '#ef4444', textOutline: false, fontSize: 12, countdownFontSize: 8, fontBold: false, fontName: '', rememberSession: true,
   selectedIds: [1, 2], aliases: {}, demo: true
@@ -65,6 +66,7 @@ export interface DesktopAPI {
   menuAction(action: 'settings' | 'refresh' | 'visibility' | 'update' | 'quit'): void;
   resizeUpdateMenu(expanded: boolean): void;
   menuReady(): void;
+  settingsReady(): void;
   subscribeMenuReset(listener: () => void): () => void;
   dismissMenu(): void;
   closeSettings(): void;

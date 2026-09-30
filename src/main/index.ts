@@ -22,8 +22,9 @@ let store: Store, config: Configuration, controller: Controller, floating: Brows
 let detail: BrowserWindow | null = null, settings: BrowserWindow | null = null, menu: BrowserWindow | null = null;
 let snapPreview: BrowserWindow | null = null, tray: Tray;
 let updates: Updates, baseTrayIcon: Electron.NativeImage, menuExpanded = false;
-const popupReady = new WeakMap<BrowserWindow, Promise<void>>();
-const popupRendered = new Map<Electron.WebContents, () => void>();
+const viewReady = new WeakMap<BrowserWindow, Promise<void>>();
+const viewRendered = new Map<Electron.WebContents, () => void>();
+let settingsRequest = 0, settingsOpening = false;
 let menuRequest = 0, lastTrayRightClick = 0;
 let menuAnchor: Electron.Rectangle | null = null, stopMenuWatch: (() => void) | null = null;
 let menuWatchAbort: AbortController | null = null;
@@ -236,25 +237,27 @@ function resizeMenu(expanded: boolean): void {
   menuExpanded = expanded;
   syncMenuHeight();
 }
-function preparePopup(window: BrowserWindow): void {
+function prepareView(window: BrowserWindow, view: 'menu' | 'settings'): void {
   const contents = window.webContents;
-  window.setAlwaysOnTop(true, 'pop-up-menu');
-  window.webContents.setBackgroundThrottling(false);
+  if (view === 'menu') {
+    window.setAlwaysOnTop(true, 'pop-up-menu');
+    window.webContents.setBackgroundThrottling(false);
+  }
   const painted = new Promise<void>((resolve, reject) => {
     window.once('ready-to-show', resolve);
-    window.once('closed', () => reject(new Error('菜单窗口已关闭')));
+    window.once('closed', () => reject(new Error('窗口已关闭')));
     window.webContents.once('did-fail-load', (_event, _code, description) => reject(new Error(description)));
   });
-  const rendered = new Promise<void>(resolve => { popupRendered.set(contents, resolve); });
-  window.once('closed', () => popupRendered.delete(contents));
-  popupReady.set(window, Promise.all([painted, rendered]).then(() => {}));
-  url(window, 'menu');
+  const rendered = new Promise<void>(resolve => { viewRendered.set(contents, resolve); });
+  window.once('closed', () => viewRendered.delete(contents));
+  viewReady.set(window, Promise.all([painted, rendered]).then(() => {}));
+  url(window, view);
 }
 function ensureMenu(): BrowserWindow {
   if (!menu || menu.isDestroyed()) {
     menu = makeWindow(176, menuHeight());
     const window = menu;
-    preparePopup(window);
+    prepareView(window, 'menu');
     window.on('blur', () => {
       if (menu === window && window.isFocusable() && !window.webContents.isDevToolsOpened()) closeMenu();
     });
@@ -270,7 +273,7 @@ async function openMenu(anchor: Electron.Rectangle): Promise<void> {
   const request = menuRequest;
   const target = ensureMenu();
   try {
-    await popupReady.get(target);
+    await viewReady.get(target);
     if (request !== menuRequest || target.isDestroyed()) return;
     menuAnchor = anchor;
     const display = displayFor(anchor);
@@ -296,16 +299,36 @@ function openTrayMenu(icon: Electron.Rectangle, toggle = false): void {
   const anchor = icon.width > 0 && icon.height > 0 ? icon : { ...cursor, width: 1, height: 1 };
   void openMenu(anchor);
 }
-function openSettings(): void {
+async function openSettings(): Promise<void> {
   closeMenu();
+  if (settingsOpening) return;
+  settingsOpening = true;
+  const request = ++settingsRequest;
   if (!settings || settings.isDestroyed()) {
     settings = makeWindow(520, 568, true);
+    const window = settings;
     settings.setResizable(true); settings.setMinimumSize(470, 420);
     settings.setAlwaysOnTop(false); settings.setSkipTaskbar(false);
-    settings.center(); url(settings, 'settings');
-    settings.on('closed', () => { controller.setAccountsVisible(false); settings = null; });
+    settings.center(); prepareView(settings, 'settings');
+    settings.on('closed', () => {
+      if (settings !== window) return;
+      controller.setAccountsVisible(false); settings = null;
+      settingsRequest++; settingsOpening = false;
+    });
   }
-  settings.show(); settings.focus(); publish();
+  const target = settings;
+  try {
+    await viewReady.get(target);
+    if (request !== settingsRequest || target.isDestroyed()) return;
+    publish();
+    if (!target.isVisible()) target.show();
+    target.focus();
+  } catch (error) {
+    if (request === settingsRequest && !target.isDestroyed()) target.destroy();
+    console.error('Unable to show settings:', error);
+  } finally {
+    if (request === settingsRequest) settingsOpening = false;
+  }
 }
 function menuAction(action: 'settings' | 'refresh' | 'visibility' | 'update' | 'quit'): void {
   closeMenu();
@@ -320,7 +343,9 @@ function setupIpc(): void {
   ipcMain.handle('settings:update', async (event, patch: Partial<Settings>) => {
     if (senderView(event) !== 'settings') return { ok: false, error: '无效窗口' };
     try { const parsed = settingsSchema.partial().parse(patch); if (parsed.autoStart !== undefined) configureAutoStart(parsed.autoStart);
-      await controller.update(parsed); resizeFloating(); return { ok: true, value: undefined }; }
+      await controller.update(parsed);
+      if (parsed.updateCheckMinutes !== undefined) updates.setCheckInterval(parsed.updateCheckMinutes);
+      resizeFloating(); return { ok: true, value: undefined }; }
     catch (error) { return { ok: false, error: error instanceof Error ? error.message : '保存失败' }; }
   });
   ipcMain.handle('auth:login', async (event, input: LoginInput) => {
@@ -385,10 +410,15 @@ function setupIpc(): void {
     if (senderView(event) === surface) hover(surface, inside);
   });
   ipcMain.on('menu:action', (event, action: 'settings' | 'refresh' | 'visibility' | 'update' | 'quit') => { if (senderView(event) === 'menu' && menu?.isVisible()) menuAction(action); });
-  ipcMain.on('menu:ready', event => { if (senderView(event) === 'menu') { popupRendered.get(event.sender)?.(); popupRendered.delete(event.sender); } });
+  for (const view of ['menu', 'settings']) ipcMain.on(`${view}:ready`, event => {
+    if (senderView(event) === view) { viewRendered.get(event.sender)?.(); viewRendered.delete(event.sender); }
+  });
   ipcMain.on('menu:resize-update', (event, expanded: boolean) => { if (senderView(event) === 'menu') resizeMenu(expanded === true); });
   ipcMain.on('menu:dismiss', event => { if (senderView(event) === 'menu') closeMenu(); });
-  ipcMain.on('settings:close', event => { if (senderView(event) === 'settings') { controller.setAccountsVisible(false); settings?.hide(); } });
+  ipcMain.on('settings:close', event => { if (senderView(event) === 'settings') {
+    settingsRequest++; settingsOpening = false;
+    controller.setAccountsVisible(false); settings?.hide();
+  } });
 }
 
 app.on('second-instance', () => { if (floating) { visible = true; floating.showInactive(); openSettings(); } });
@@ -424,7 +454,7 @@ app.whenReady().then(() => {
     tray.setToolTip(state.version ? `Sub2API Quota Monitor · 新版本 ${state.version}` : 'Sub2API Quota Monitor');
     syncMenuHeight();
     publish();
-  }, process.env.QUOTA_DATA_DIR ? process.env.QUOTA_TEST_UPDATE_VERSION : undefined);
+  }, process.env.QUOTA_DATA_DIR ? process.env.QUOTA_TEST_UPDATE_VERSION : undefined, config.settings.updateCheckMinutes);
   updates.start();
   controller.on('state', () => { resizeFloating(); publish(); });
   screen.on('display-metrics-changed', () => { closeMenu(); resizeFloating(); });
@@ -444,6 +474,7 @@ app.whenReady().then(() => {
   void controller.start().then(() => { if (controller.state.connection.status === 'disconnected' && !config.settings.demo) openSettings(); });
 });
 app.on('before-quit', () => {
+  settingsRequest++;
   menuRequest++;
   menuWatchAbort?.abort(); stopMenuWatch?.();
   for (const timer of [dragTimer, opacityTimer, leaveTimer, hoverTimer, rotationTimer]) if (timer) clearInterval(timer);

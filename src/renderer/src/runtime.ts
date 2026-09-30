@@ -47,6 +47,7 @@ function browserPreview(): DesktopAPI {
       if (action === 'refresh') { snapshot = { ...snapshot, lastRefresh: Date.now() }; publish(); } },
     resizeUpdateMenu: () => {},
     menuReady: () => {},
+    settingsReady: () => {},
     subscribeMenuReset: () => () => {},
     dismissMenu: () => { location.search = '?view=floating'; },
     closeSettings: () => { location.search = '?view=floating'; }

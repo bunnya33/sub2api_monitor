@@ -17,6 +17,25 @@ async function trayRightClick(electronApp, x, y, count = 1) {
   throw new Error('Tray menu did not become visible');
 }
 
+async function buttonColors(button, disabled = false) {
+  return button.evaluate(async (element, disabled) => {
+    const originalClass = element.className, originalDisabled = element.disabled;
+    if (disabled) { element.disabled = true; element.classList.add('is-disabled'); }
+    if (disabled) await new Promise(resolve => setTimeout(resolve, 200));
+    const style = getComputedStyle(element);
+    const light = color => {
+      const rgb = color.match(/\d+/g).slice(0, 3).map(value => Number(value) / 255)
+        .map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4);
+      return .2126 * rgb[0] + .7152 * rgb[1] + .0722 * rgb[2];
+    };
+    const foreground = style.color, background = style.backgroundColor;
+    const a = light(foreground), b = light(background);
+    const result = { foreground, background, opacity: Number(style.opacity), contrast: (Math.max(a, b) + .05) / (Math.min(a, b) + .05) };
+    element.className = originalClass; element.disabled = originalDisabled;
+    return result;
+  }, disabled);
+}
+
 (async () => {
   const root = path.join(__dirname, '..');
   const data = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-electron-smoke-'));
@@ -181,6 +200,27 @@ async function trayRightClick(electronApp, x, y, count = 1) {
     assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter(w => /[?&]view=menu(?:&|$)/.test(w.webContents.getURL())).length), 0);
     assert.equal(await floating.evaluate(() => 'openContextMenu' in window.desktop), false);
     checks.push('floating right-click does not create a menu or expose a menu-opening command');
+    await app.evaluate(({ app, ipcMain }) => {
+      globalThis.settingsLifecycle = [];
+      globalThis.renderedSettings = new Set();
+      globalThis.duplicateSettingsRequests = 0;
+      ipcMain.on('settings:ready', event => globalThis.renderedSettings.add(event.sender.id));
+      app.on('browser-window-created', (_event, window) => {
+        let painted = false;
+        window.once('ready-to-show', () => { painted = true; });
+        for (const event of ['show', 'hide']) window.on(event, () => {
+          if (!window.webContents.getURL().includes('view=settings')) return;
+          globalThis.settingsLifecycle.push({ id: window.id, event, painted, rendered: globalThis.renderedSettings.has(window.webContents.id) });
+        });
+        window.webContents.once('did-start-navigation', (_event, url) => {
+          if (url.includes('view=settings')) {
+            // Startup and tray requests can arrive while the first page is loading.
+            globalThis.duplicateSettingsRequests += 2;
+            app.emit('second-instance'); app.emit('second-instance');
+          }
+        });
+      });
+    });
     const menuWindow = app.waitForEvent('window', { predicate: window => /[?&]view=menu(?:&|$)/.test(window.url()), timeout: 5000 });
     await trayRightClick(app, 500, 300);
     const menu = await menuWindow;
@@ -193,6 +233,16 @@ async function trayRightClick(electronApp, x, y, count = 1) {
     await menu.getByRole('menuitem', { name: '设置' }).click();
     const settings = await settingsWindow;
     await settings.waitForSelector('.settings');
+    const waitSettingsVisible = async () => {
+      for (let attempt = 0; attempt < 100; attempt++) {
+        if (await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some(w => w.webContents.getURL().includes('view=settings') && w.isVisible()))) return;
+        await floating.waitForTimeout(50);
+      }
+      throw new Error('Settings did not become visible');
+    };
+    await waitSettingsVisible();
+    assert.equal(await app.evaluate(() => globalThis.duplicateSettingsRequests), 2);
+    assert.deepEqual((await app.evaluate(() => globalThis.settingsLifecycle)).map(event => ({ event: event.event, painted: event.painted, rendered: event.rendered })), [{ event: 'show', painted: true, rendered: true }]);
     // The initial click used to be the only menu action tested. Exercise each new opening.
     for (let cycle = 0; cycle < 3; cycle++) {
       await settings.evaluate(() => window.desktop.closeSettings());
@@ -211,10 +261,16 @@ async function trayRightClick(electronApp, x, y, count = 1) {
       }, refreshBefore);
       const settingsMenu = await trayRightClick(app, 500, 300);
       await settingsMenu.getByRole('menuitem', { name: '设置' }).click();
+      await waitSettingsVisible();
       assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(w => /[?&]view=settings(?:&|$)/.test(w.webContents.getURL())).isVisible()), true);
       assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter(w => /[?&]view=menu(?:&|$)/.test(w.webContents.getURL())).length), 0);
     }
     checks.push('settings, hide, show and refresh remain clickable across repeated tray openings');
+    const settingsLifecycle = await app.evaluate(() => globalThis.settingsLifecycle);
+    assert.deepEqual(settingsLifecycle.map(event => event.event), ['show', 'hide', 'show', 'hide', 'show', 'hide', 'show']);
+    assert.equal(new Set(settingsLifecycle.map(event => event.id)).size, 1);
+    assert.ok(settingsLifecycle.filter(event => event.event === 'show').every(event => event.painted && event.rendered));
+    checks.push('settings waits for paint and Vue layout, coalesces duplicate requests and reopens without hide/show flashes');
     const switchFor = label => settings.getByText(label, { exact: true }).locator('..').locator('.el-switch');
     const isSwitchOn = async label => (await switchFor(label).locator('input').getAttribute('aria-checked')) === 'true';
     const setSwitch = async (label, enabled) => { if (await isSwitchOn(label) !== enabled) await switchFor(label).click(); };
@@ -225,6 +281,11 @@ async function trayRightClick(electronApp, x, y, count = 1) {
     assert.equal(await settings.getByRole('tab').count(), 5); checks.push('custom frameless settings with five tabs');
     await settings.screenshot({ path: path.join(output, 'settings-display.png') });
     await settings.getByRole('tab', { name: '刷新' }).click();
+    const updateInterval = settings.getByRole('spinbutton', { name: '版本检查间隔' });
+    assert.equal(await updateInterval.inputValue(), '10');
+    await updateInterval.fill('3'); await updateInterval.press('Enter');
+    await floating.waitForFunction(async () => (await window.desktop.getState()).settings.updateCheckMinutes === 3);
+    checks.push('update interval defaults to ten minutes and is editable in Refresh settings');
     assert.equal(await isSwitchOn('开机自启动'), true);
     await setSwitch('开机自启动', false);
     await floating.waitForFunction(async () => (await window.desktop.getState()).settings.autoStart === false);
@@ -406,11 +467,28 @@ async function trayRightClick(electronApp, x, y, count = 1) {
     await floating.waitForFunction(async () => (await window.desktop.getState()).rotatingPeriod === 'seven', null, { timeout: 10000 });
     checks.push('docked account rotates on schedule');
     await settings.getByRole('tab', { name: '连接' }).click();
+    const loginButton = settings.getByRole('button', { name: '登录', exact: true });
+    await settings.mouse.move(10, 10);
+    const loginNormal = await buttonColors(loginButton);
+    await loginButton.hover();
+    await settings.waitForFunction(background => getComputedStyle(document.querySelector('.login-form .el-button--primary')).backgroundColor !== background, loginNormal.background);
+    await settings.waitForTimeout(200);
+    const loginHover = await buttonColors(loginButton);
+    const loginDisabled = await buttonColors(loginButton, true);
+    for (const colors of [loginNormal, loginHover, loginDisabled]) {
+      assert.ok(colors.contrast >= 4.5, `unreadable login button: ${JSON.stringify(colors)}`);
+      assert.equal(colors.opacity, 1);
+    }
+    assert.notEqual(loginNormal.background, loginHover.background);
+    await settings.screenshot({ path: path.join(output, 'settings-login-colors.png') });
+    fs.writeFileSync(path.join(output, 'login-colors.json'), JSON.stringify({ loginNormal, loginHover, loginDisabled }, null, 2));
+    checks.push('login button has readable normal, hover and disabled colors with at least 4.5:1 contrast');
     await settings.getByLabel('服务器地址').fill(`http://127.0.0.1:${fixture.address().port}`);
     await settings.getByLabel('邮箱').fill('admin@example.com');
     await settings.getByLabel('密码').fill('fixture-password');
     await settings.getByRole('button', { name: '登录', exact: true }).click();
     await settings.locator('.connection-status', { hasText: '需要双重验证' }).waitFor();
+    assert.ok((await buttonColors(settings.getByRole('button', { name: '验证' }))).contrast >= 4.5);
     await settings.getByLabel('双重验证码').fill('123456');
     await settings.getByRole('button', { name: '验证' }).click();
     await settings.locator('.connection-status', { hasText: '已登录 · 管理员' }).waitFor();
@@ -544,6 +622,7 @@ async function trayRightClick(electronApp, x, y, count = 1) {
     assert.equal(restored.quotas.length, 2);
     assert.equal(restored.settings.aliases['1'], '主力账号');
     assert.equal(restored.settings.autoStart, false);
+    assert.equal(restored.settings.updateCheckMinutes, 3);
     assert.equal(restored.settings.nameWidth, 80);
     assert.equal(restored.settings.fontName, 'arial.ttf');
     assert.equal(restored.settings.showResetCount, true);
@@ -620,6 +699,7 @@ async function trayRightClick(electronApp, x, y, count = 1) {
     const legacySettings = { ...state.settings, topWidth: 178, sideWidth: 72 };
     delete legacySettings.concurrencyWidth;
     delete legacySettings.autoStart;
+    delete legacySettings.updateCheckMinutes;
     fs.writeFileSync(path.join(legacyData, 'settings.json'), JSON.stringify({ settings: legacySettings, paletteVersion: 2 }));
     activeApp = await _electron.launch({ executablePath,
       args: process.env.QUOTA_EXECUTABLE ? [] : [root], env: { ...process.env, QUOTA_DATA_DIR: legacyData } });
@@ -628,6 +708,7 @@ async function trayRightClick(electronApp, x, y, count = 1) {
     assert.equal(migrated.settings.sideWidth, 72);
     assert.equal(migrated.settings.concurrencyWidth, 36);
     assert.equal(migrated.settings.autoStart, true);
+    assert.equal(migrated.settings.updateCheckMinutes, 10);
     checks.push('older default top width migrates to 160px while custom side width remains');
     await activeApp.close(); activeApp = null;
     const updateData = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-update-menu-'));

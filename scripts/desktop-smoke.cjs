@@ -5,6 +5,12 @@ const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
 
+async function trayRightClick(electronApp, x, y, count = 1) {
+  await electronApp.evaluate(({ app }, { x, y, count }) => {
+    for (let i = 0; i < count; i++) app.emit('quota:test-tray-right-click', { x, y, width: 24, height: 24 });
+  }, { x, y, count });
+}
+
 (async () => {
   const root = path.join(__dirname, '..');
   const data = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-electron-smoke-'));
@@ -57,6 +63,9 @@ const path = require('node:path');
       const window = BrowserWindow.getAllWindows().find(item => item.webContents.getURL().includes('view=floating'));
       const work = screen.getPrimaryDisplay().workArea;
       window.setPosition(work.x + 240, work.y + 180);
+      // Playwright sends renderer pointer events; keep unrelated physical mouse movement out of this test.
+      const testCursor = { x: work.x + 260, y: work.y + 200 };
+      screen.getCursorScreenPoint = () => testCursor;
     });
     const state = await floating.evaluate(() => window.desktop.getState());
     assert.equal(state.quotas.length, 2); checks.push('two demo accounts');
@@ -154,20 +163,26 @@ const path = require('node:path');
     await floating.waitForTimeout(220);
     checks.push('detail does not cover the ball at the bottom-right corner');
     await floating.evaluate(() => { window.desktop.hover('floating', false); window.desktop.hover('detail', false); });
-    await floating.waitForTimeout(220);
+    // Let the 300ms detail-close delay and 140ms opacity transition complete.
+    await floating.waitForTimeout(550);
     const idleOpacity = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('view=floating')).getOpacity());
     assert.ok(Math.abs(idleOpacity - .65) < .03); checks.push('idle window opacity 65 percent');
     await floating.evaluate(() => window.desktop.hover('floating', true));
     await floating.waitForTimeout(300);
     assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('view=detail')).isVisible()), true);
-    const menuWindow = app.waitForEvent('window', { predicate: window => window.url().includes('view=menu'), timeout: 5000 });
     await floating.mouse.click(18, 16, { button: 'right' });
+    await floating.waitForTimeout(300);
+    assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter(w => /[?&]view=menu(?:&|$)/.test(w.webContents.getURL())).length), 0);
+    assert.equal(await floating.evaluate(() => 'openContextMenu' in window.desktop), false);
+    checks.push('floating right-click does not create a menu or expose a menu-opening command');
+    const menuWindow = app.waitForEvent('window', { predicate: window => /[?&]view=menu(?:&|$)/.test(window.url()), timeout: 5000 });
+    await trayRightClick(app, 500, 300);
     const menu = await menuWindow;
     await menu.waitForSelector('.menu');
     assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('view=detail')).isVisible()), false);
-    checks.push('floating context menu immediately closes quota details');
-    assert.equal(await menu.locator('.menu button').count(), 4); checks.push('custom floating context menu');
-    assert.equal((await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('view=menu')).getBounds())).height, 151);
+    checks.push('tray context menu closes quota details');
+    assert.equal(await menu.locator('.menu button').count(), 4); checks.push('custom tray context menu opens settings');
+    assert.equal((await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(w => /[?&]view=menu(?:&|$)/.test(w.webContents.getURL())).getBounds())).height, 151);
     const settingsWindow = app.waitForEvent('window', { predicate: window => window.url().includes('view=settings'), timeout: 5000 });
     await menu.getByRole('menuitem', { name: '设置' }).click();
     const settings = await settingsWindow;
@@ -511,36 +526,57 @@ const path = require('node:path');
     assert.ok(requests.includes('/api/v1/auth/refresh'));
     checks.push('encrypted session and style settings restore after restart');
     await restoredFloat.screenshot({ path: path.join(output, 'restored-floating.png') });
-    const fakeOverflow = await activeApp.evaluate(({ BrowserWindow, screen }) => {
+    await activeApp.evaluate(({ app }) => {
+      globalThis.menuLifecycle = [];
+      app.on('browser-window-created', (_event, window) => {
+        for (const event of ['ready-to-show', 'show', 'hide']) window.on(event, () => {
+          globalThis.menuLifecycle.push({ id: window.id, event, url: window.webContents.getURL() });
+        });
+      });
+    });
+    const fakeOverflow = await activeApp.evaluate(async ({ BrowserWindow, screen }) => {
       const work = screen.getPrimaryDisplay().workArea;
-      const panel = new BrowserWindow({ x: work.x + 20, y: work.y + 20, width: 230, height: 230, alwaysOnTop: true });
-      panel.loadURL('data:text/html,<body style="background:%23dbe7df">System panel</body>');
+      const panel = new BrowserWindow({ x: work.x + 20, y: work.y + 20, width: 230, height: 230, alwaysOnTop: true, show: false });
+      await panel.loadURL('data:text/html,<body style="background:%23dbe7df">System panel</body>');
       panel.show(); panel.focus();
       return { id: panel.id, x: work.x + 40, y: work.y + 40 };
     });
-    const trayMenuWindow = activeApp.waitForEvent('window', { predicate: window => window.url().includes('view=menu'), timeout: 5000 });
+    const trayMenuWindow = activeApp.waitForEvent('window', { predicate: window => /[?&]view=menu(?:&|$)/.test(window.url()), timeout: 5000 });
     const backdropWindow = activeApp.waitForEvent('window', { predicate: window => window.url().includes('view=menu-backdrop'), timeout: 5000 });
-    await restoredFloat.evaluate(({ x, y }) => window.desktop.openContextMenu(x, y, true), fakeOverflow);
+    await trayRightClick(activeApp, fakeOverflow.x, fakeOverflow.y);
     const [trayMenu, backdrop] = await Promise.all([trayMenuWindow, backdropWindow]);
     await trayMenu.waitForSelector('.menu');
     await backdrop.waitForSelector('.menu-backdrop');
+    await trayMenu.waitForTimeout(200);
+    const lifecycle = await activeApp.evaluate(() => globalThis.menuLifecycle.filter(event => /[?&]view=menu(?:&|$)/.test(event.url)));
+    assert.deepEqual(lifecycle.map(event => event.event), ['ready-to-show', 'show']);
+    checks.push('tray popup is painted before its single show and stays visible');
     const backdropBounds = await activeApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes('view=menu-backdrop')).getBounds());
     const trayWorkArea = await activeApp.evaluate(({ screen }, point) => screen.getDisplayNearestPoint(point).workArea, fakeOverflow);
     assert.deepEqual(backdropBounds, trayWorkArea);
     const beforeOutsideClick = await activeApp.evaluate(({ BrowserWindow }, id) => ({
       focused: BrowserWindow.getFocusedWindow()?.id, panel: BrowserWindow.fromId(id)?.isVisible(),
-      menu: BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes('view=menu'))?.isVisible(),
+      menu: BrowserWindow.getAllWindows().find(window => /[?&]view=menu(?:&|$)/.test(window.webContents.getURL()))?.isVisible(),
       backdrop: BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes('view=menu-backdrop'))?.isVisible()
     }), fakeOverflow.id);
     assert.deepEqual(beforeOutsideClick, { focused: fakeOverflow.id, panel: true, menu: true, backdrop: true });
+    await activeApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(window => /[?&]view=menu(?:&|$)/.test(window.webContents.getURL())).emit('blur'));
+    assert.equal(await activeApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(window => /[?&]view=menu(?:&|$)/.test(window.webContents.getURL())).isVisible()), true);
+    checks.push('inactive tray popup ignores blur until it has received focus');
     await backdrop.locator('.menu-backdrop').click({ position: { x: 500, y: 500 } });
     await restoredFloat.waitForTimeout(100);
     const afterOutsideClick = await activeApp.evaluate(({ BrowserWindow }, id) => ({
       focused: BrowserWindow.getFocusedWindow()?.id, panel: BrowserWindow.fromId(id)?.isVisible(),
-      menu: BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes('view=menu'))?.isVisible(),
+      menu: BrowserWindow.getAllWindows().find(window => /[?&]view=menu(?:&|$)/.test(window.webContents.getURL()))?.isVisible(),
       backdrop: BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes('view=menu-backdrop'))?.isVisible()
     }), fakeOverflow.id);
     assert.deepEqual(afterOutsideClick, { focused: fakeOverflow.id, panel: true, menu: false, backdrop: false });
+    await trayRightClick(activeApp, fakeOverflow.x, fakeOverflow.y, 2);
+    await trayMenu.waitForTimeout(200);
+    assert.equal(await activeApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(window => /[?&]view=menu(?:&|$)/.test(window.webContents.getURL())).isVisible()), true);
+    const reopenLifecycle = await activeApp.evaluate(() => globalThis.menuLifecycle.filter(event => /[?&]view=menu(?:&|$)/.test(event.url)));
+    assert.deepEqual(reopenLifecycle.map(event => event.event), ['ready-to-show', 'show', 'hide', 'show']);
+    checks.push('duplicate tray open requests do not toggle or flash the popup');
     await activeApp.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)?.close(), fakeOverflow.id);
     checks.push('tray menu keeps the system panel focused and outside click closes only our menu first');
     await activeApp.close(); activeApp = null;
@@ -566,7 +602,7 @@ const path = require('node:path');
     await updateFloat.waitForFunction(async () => (await window.desktop.getState()).update.status === 'available');
     const updateMenuWindow = activeApp.waitForEvent('window', { predicate: window => /[?&]view=menu(?:&|$)/.test(window.url()), timeout: 5000 });
     const updateBackdropWindow = activeApp.waitForEvent('window', { predicate: window => window.url().includes('view=menu-backdrop'), timeout: 5000 });
-    await updateFloat.evaluate(() => window.desktop.openContextMenu(500, 300, true));
+    await trayRightClick(activeApp, 500, 300);
     const updateMenu = await updateMenuWindow;
     await updateBackdropWindow;
     await updateMenu.getByRole('menuitem', { name: '更新到 v9.9.9' }).waitFor();
@@ -590,9 +626,13 @@ const path = require('node:path');
     await updateMenu.getByRole('menuitem', { name: '更新到 v9.9.9' }).click();
     await updateMenu.getByRole('button', { name: '确认' }).click();
     await updateFloat.waitForFunction(async () => (await window.desktop.getState()).update.status === 'downloading');
-    await updateFloat.evaluate(() => window.desktop.openContextMenu(500, 300));
+    await updateFloat.mouse.click(18, 16, { button: 'right' });
+    assert.equal(await activeApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(window => /[?&]view=menu(?:&|$)/.test(window.webContents.getURL())).isVisible()), false);
+    await trayRightClick(activeApp, 500, 300);
     await updateMenu.getByRole('menuitem', { name: '下载更新 0%' }).waitFor();
     assert.equal(await updateMenu.locator('.menu.expanded').count(), 0);
+    assert.equal(await updateMenu.locator('.el-popconfirm:visible').count(), 0);
+    checks.push('tray menu reopens without a stale update confirmation');
     checks.push('update badge state, balanced menu and Popconfirm gate downloads');
     fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks }, null, 2));
     console.log(JSON.stringify({ passed: true, checks }, null, 2));

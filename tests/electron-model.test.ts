@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { alias, color, defaults, ink, migrateLegacyPalette, outlineInk, percent, resetCountdown, severity, shortName, summaryPeriods, supportsFive, visiblePeriods, type Quota } from '../src/shared/model';
-import { clampRect, detailHeight, detailRect, size, snapEdge } from '../src/shared/geometry';
+import { clampRect, detailHeight, detailRect, size, snapEdge, trayMenuRect } from '../src/shared/geometry';
 import { mapUsage, normalizeServer } from '../src/main/api';
 
 const account = { id: 7, name: 'Claude-Production', platform: 'anthropic', type: 'oauth', status: 'active' };
@@ -112,6 +112,23 @@ describe('multi-display work area geometry', () => {
     expect(rect.x).toBeGreaterThanOrEqual(work.x);
     expect(rect.x + rect.width).toBeLessThanOrEqual(work.x + work.width);
     expect(rect.y + rect.height).toBeLessThanOrEqual(work.y + work.height);
+  });
+  it('anchors tray menus on the taskbar while keeping them inside their display', () => {
+    const display = { x: -1920, y: -200, width: 1920, height: 1080 };
+    const bottomWork = { ...display, height: 1032 };
+    const bottomIcon = { x: -90, y: 839, width: 24, height: 24 };
+    const bottom = trayMenuRect(bottomIcon, display, bottomWork, 151);
+    expect(bottom.y + bottom.height).toBe(bottomIcon.y + bottomIcon.height);
+    expect(bottom.y + bottom.height).toBeGreaterThan(bottomWork.y + bottomWork.height);
+    expect(bottom.x + bottom.width).toBe(bottomIcon.x + bottomIcon.width);
+    const top = trayMenuRect({ x: -25, y: -195, width: 24, height: 24 }, display,
+      { ...display, y: -152, height: 1032 }, 183);
+    expect(top.y).toBe(-195);
+    expect(top.x + top.width).toBeLessThanOrEqual(display.x + display.width);
+    const left = trayMenuRect({ x: -1915, y: 700, width: 24, height: 24 }, display,
+      { ...display, x: -1872, width: 1872 }, 287);
+    expect(left.x).toBe(-1915);
+    expect(left.y + left.height).toBeLessThanOrEqual(display.y + display.height);
   });
   it('keeps detail off the floating window at the bottom-right corner', () => {
     const work = { x: 0, y: 0, width: 1920, height: 1040 };

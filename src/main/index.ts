@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, nativeImage, net, protocol, screen
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { clampRect, detailRect, size, snapEdge } from '../shared/geometry';
+import { clampRect, detailRect, size, snapEdge, trayMenuRect } from '../shared/geometry';
 import { loginSchema, settingsSchema, type Edge, type LoginInput, type Period, type Rect, type Settings, type Snapshot } from '../shared/model';
 import { Controller } from './controller';
 import { Store, type Configuration } from './store';
@@ -21,17 +21,21 @@ let store: Store, config: Configuration, controller: Controller, floating: Brows
 let detail: BrowserWindow | null = null, settings: BrowserWindow | null = null, menu: BrowserWindow | null = null;
 let snapPreview: BrowserWindow | null = null, menuBackdrop: BrowserWindow | null = null, tray: Tray;
 let updates: Updates, baseTrayIcon: Electron.NativeImage, menuExpanded = false;
+const popupReady = new WeakMap<BrowserWindow, Promise<void>>();
+const popupRendered = new Map<Electron.WebContents, () => void>();
+let menuRequest = 0, lastTrayRightClick = 0;
 const MENU_CONFIRM_SPACE = 104;
 let edge: Edge = null, rotatingIndex = 0, rotatingPeriod: Period = 'five', visible = true, overFloating = false, overDetail = false;
-let snapPreviewEdge: Edge = null, menuFromTray = false;
+let snapPreviewEdge: Edge = null;
 let dragging = false, dragTimer: NodeJS.Timeout | null = null, leaveTimer: NodeJS.Timeout | null = null, hoverTimer: NodeJS.Timeout | null = null;
 let dragOrigin: { native: Electron.Point; bounds: Electron.Rectangle; offsetX: number; offsetY: number; pointerX: number; pointerY: number } | null = null;
 let rotationTimer: NodeJS.Timeout, nextRotation = 0, opacityTimer: NodeJS.Timeout | null = null;
 let currentOpacity = 1;
 
 function url(window: BrowserWindow, view: 'floating' | 'detail' | 'settings' | 'menu' | 'menu-backdrop' | 'snap-preview'): void {
-  if (process.env.ELECTRON_RENDERER_URL) void window.loadURL(`${process.env.ELECTRON_RENDERER_URL}?view=${view}`);
-  else void window.loadFile(path.join(__dirname, '../renderer/index.html'), { query: { view } });
+  const query = { view };
+  if (process.env.ELECTRON_RENDERER_URL) void window.loadURL(`${process.env.ELECTRON_RENDERER_URL}?${new URLSearchParams(query)}`);
+  else void window.loadFile(path.join(__dirname, '../renderer/index.html'), { query });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', event => event.preventDefault());
 }
@@ -198,54 +202,97 @@ function hover(surface: 'floating' | 'detail', inside: boolean): void {
   nextRotation = Date.now() + controller.state.settings.rotateSeconds * 1000;
   applyOpacity();
 }
-function closeMenu(dismissOverflow = false): void {
-  if (dismissOverflow && menuFromTray && menu?.isVisible() && !menu.isFocused()) menu.focus();
-  if (menu?.isVisible()) menu.webContents.send('menu:reset');
-  menu?.hide(); menuBackdrop?.hide(); menuFromTray = false; menuExpanded = false;
+function closeMenu(): void {
+  menuRequest++;
+  if (menu && !menu.isDestroyed() && menu.isVisible()) {
+    menu.webContents.send('menu:reset');
+    menu.hide();
+  }
+  if (menuBackdrop && !menuBackdrop.isDestroyed() && menuBackdrop.isVisible()) menuBackdrop.hide();
+  menuExpanded = false;
 }
-function menuHeight(): number {
-  return (controller.state.update.status === 'idle' ? 151 : 183) + (menuExpanded ? MENU_CONFIRM_SPACE : 0);
+function menuHeight(expanded = menuExpanded): number {
+  return (controller.state.update.status === 'idle' ? 151 : 183) + (expanded ? MENU_CONFIRM_SPACE : 0);
 }
 function syncMenuHeight(): void {
   if (!menu?.isVisible()) return;
   const old = menu.getBounds(), height = menuHeight();
   if (old.height === height) return;
-  const work = displayFor(old).workArea;
-  menu.setBounds(clampRect({ ...old, y: old.y + old.height - height, height }, work));
+  const display = displayFor(old);
+  menu.setBounds(clampRect({ ...old, y: old.y + old.height - height, height }, display.bounds));
 }
 function resizeMenu(expanded: boolean): void {
   if (!menu?.isVisible() || menuExpanded === expanded) return;
   menuExpanded = expanded;
   syncMenuHeight();
 }
-function showMenuBackdrop(x: number, y: number): void {
+function preparePopup(window: BrowserWindow, view: 'menu' | 'menu-backdrop'): void {
+  const contents = window.webContents;
+  window.setAlwaysOnTop(true, 'pop-up-menu');
+  window.webContents.setBackgroundThrottling(false);
+  const painted = new Promise<void>((resolve, reject) => {
+    window.once('ready-to-show', resolve);
+    window.once('closed', () => reject(new Error('菜单窗口已关闭')));
+    window.webContents.once('did-fail-load', (_event, _code, description) => reject(new Error(description)));
+  });
+  const rendered = view === 'menu' ? new Promise<void>(resolve => { popupRendered.set(contents, resolve); }) : Promise.resolve();
+  window.once('closed', () => popupRendered.delete(contents));
+  popupReady.set(window, Promise.all([painted, rendered]).then(() => {}));
+  url(window, view);
+}
+function ensureMenuBackdrop(): BrowserWindow {
   if (!menuBackdrop || menuBackdrop.isDestroyed()) {
     menuBackdrop = makeWindow(1, 1);
-    url(menuBackdrop, 'menu-backdrop');
+    preparePopup(menuBackdrop, 'menu-backdrop');
     menuBackdrop.on('closed', () => { menuBackdrop = null; });
   }
-  menuBackdrop.setBounds(screen.getDisplayNearestPoint({ x, y }).workArea);
-  menuBackdrop.showInactive();
-  menuBackdrop.moveTop();
+  return menuBackdrop;
 }
-function openMenu(x: number, y: number, fromTray = false): void {
-  if (fromTray && menu?.isVisible() && menuFromTray) { closeMenu(true); return; }
-  menuExpanded = false;
-  menuFromTray = fromTray;
+function ensureMenu(): BrowserWindow {
   if (!menu || menu.isDestroyed()) {
     menu = makeWindow(176, menuHeight(), true);
-    url(menu, 'menu');
-    menu.on('blur', () => { if (!menu?.webContents.isDevToolsOpened()) closeMenu(); });
-    menu.on('closed', () => { menu = null; });
+    const window = menu;
+    let receivedFocus = false;
+    preparePopup(window, 'menu');
+    window.on('focus', () => { receivedFocus = true; });
+    window.on('hide', () => { receivedFocus = false; });
+    window.on('blur', () => {
+      if (receivedFocus && !window.webContents.isDevToolsOpened()) closeMenu();
+      receivedFocus = false;
+    });
+    window.on('closed', () => {
+      closeMenu();
+      menu = null;
+    });
   }
-  const work = screen.getDisplayNearestPoint({ x, y }).workArea;
-  menu.setBounds(clampRect({ x, y, width: 176, height: menuHeight() }, work));
-  if (fromTray) {
-    showMenuBackdrop(x, y); menu.showInactive(); menu.moveTop();
-    setTimeout(() => { if (menuFromTray && menu?.isVisible()) menu.moveTop(); }, 60);
+  return menu;
+}
+async function openMenu(x: number, y: number): Promise<void> {
+  if (menu?.isVisible()) return;
+  closeMenu();
+  const request = menuRequest;
+  const target = ensureMenu(), backdrop = ensureMenuBackdrop();
+  try {
+    await Promise.all([popupReady.get(target), popupReady.get(backdrop)]);
+    if (request !== menuRequest || target.isDestroyed() || backdrop.isDestroyed()) return;
+    const display = screen.getDisplayNearestPoint({ x, y });
+    target.setBounds(clampRect({ x, y, width: 176, height: menuHeight() }, display.bounds));
+    backdrop.setBounds(display.workArea);
+    publish();
+    backdrop.showInactive(); target.showInactive();
+  } catch (error) {
+    if (request === menuRequest) closeMenu();
+    console.error('Unable to show menu:', error);
   }
-  else { menuBackdrop?.hide(); menu.show(); menu.focus(); }
-  publish();
+}
+function openTrayMenu(icon: Electron.Rectangle, toggle = false): void {
+  if (toggle && menu?.isVisible()) { closeMenu(); return; }
+  overFloating = false; hideDetail();
+  const cursor = screen.getCursorScreenPoint();
+  const anchor = icon.width > 0 && icon.height > 0 ? icon : { ...cursor, width: 1, height: 1 };
+  const display = screen.getDisplayNearestPoint({ x: anchor.x + anchor.width / 2, y: anchor.y + anchor.height / 2 });
+  const rect = trayMenuRect(anchor, display.bounds, display.workArea, menuHeight(false));
+  void openMenu(rect.x, rect.y);
 }
 function openSettings(): void {
   closeMenu();
@@ -259,7 +306,7 @@ function openSettings(): void {
   settings.show(); settings.focus(); publish();
 }
 function menuAction(action: 'settings' | 'refresh' | 'visibility' | 'update' | 'quit'): void {
-  closeMenu(true);
+  closeMenu();
   if (action === 'settings') openSettings();
   if (action === 'refresh') void controller.refresh();
   if (action === 'visibility') { visible = !visible; if (visible) floating.showInactive(); else { hideDetail(); floating.hide(); } publish(); }
@@ -328,11 +375,8 @@ function setupIpc(): void {
   ipcMain.on('hover', (event, surface: 'floating' | 'detail', inside: boolean) => {
     if (senderView(event) === surface) hover(surface, inside);
   });
-  ipcMain.on('context-menu', (event, x: number, y: number, fromTray = false) => {
-    if (senderView(event) !== 'floating') return;
-    overFloating = false; hideDetail(); openMenu(x, y, fromTray === true);
-  });
-  ipcMain.on('menu:action', (event, action: 'settings' | 'refresh' | 'visibility' | 'update' | 'quit') => { if (senderView(event) === 'menu') menuAction(action); });
+  ipcMain.on('menu:action', (event, action: 'settings' | 'refresh' | 'visibility' | 'update' | 'quit') => { if (senderView(event) === 'menu' && menu?.isVisible()) menuAction(action); });
+  ipcMain.on('menu:ready', event => { if (senderView(event) === 'menu') { popupRendered.get(event.sender)?.(); popupRendered.delete(event.sender); } });
   ipcMain.on('menu:resize-update', (event, expanded: boolean) => { if (senderView(event) === 'menu') resizeMenu(expanded === true); });
   ipcMain.on('menu:dismiss', event => { if (senderView(event) === 'menu-backdrop') closeMenu(); });
   ipcMain.on('settings:close', event => { if (senderView(event) === 'settings') settings?.hide(); });
@@ -360,8 +404,10 @@ app.whenReady().then(() => {
   baseTrayIcon = nativeImage.createFromPath(path.join(app.getAppPath(), 'assets/app.png'));
   tray = new Tray(trayIcon(baseTrayIcon, false));
   tray.setToolTip('Sub2API Quota Monitor');
-  tray.on('right-click', () => { const cursor = screen.getCursorScreenPoint(); openMenu(cursor.x, cursor.y - menuHeight(), true); });
-  tray.on('click', () => { const cursor = screen.getCursorScreenPoint(); openMenu(cursor.x, cursor.y - menuHeight(), true); });
+  tray.on('right-click', (_event, bounds) => { lastTrayRightClick = Date.now(); openTrayMenu(bounds); });
+  tray.on('click', (_event, bounds) => { if (Date.now() - lastTrayRightClick > 250) openTrayMenu(bounds, true); });
+  // Isolated desktop tests exercise the real tray event without a renderer command to open menus.
+  if (process.env.QUOTA_DATA_DIR) (app as NodeJS.EventEmitter).on('quota:test-tray-right-click', (bounds: Electron.Rectangle) => tray.emit('right-click', {}, bounds));
   setupIpc();
   updates = new Updates(state => {
     controller.state.update = state;

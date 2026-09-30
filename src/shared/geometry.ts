@@ -22,6 +22,15 @@ export function clampRect(rect: Rect, work: Rect, edge: Edge = null): Rect {
   if (edge === 'bottom') y = work.y + work.height - height;
   return { x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height) };
 }
+export function trayMenuRect(icon: Rect, display: Rect, work: Rect, height: number, width = 176): Rect {
+  const taskbarAtTop = work.y > display.y;
+  const taskbarAtLeft = work.x > display.x;
+  return clampRect({
+    x: taskbarAtLeft ? icon.x : icon.x + icon.width - width,
+    y: taskbarAtTop ? icon.y : icon.y + icon.height - height,
+    width, height
+  }, display);
+}
 export function snapEdge(rect: Rect, work: Rect, distance = 20): Edge {
   const candidates: [Exclude<Edge, null>, number][] = [
     ['left', Math.abs(rect.x - work.x)], ['right', Math.abs(work.x + work.width - rect.x - rect.width)],

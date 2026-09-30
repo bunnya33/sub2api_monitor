@@ -19,9 +19,9 @@ const api: DesktopAPI = {
   drag: (start: boolean, x?: number, y?: number) => ipcRenderer.send('drag', start, x, y),
   dragMove: (x, y) => ipcRenderer.send('drag:move', x, y),
   hover: (surface, inside) => ipcRenderer.send('hover', surface, inside),
-  openContextMenu: (x, y, fromTray = false) => ipcRenderer.send('context-menu', x, y, fromTray),
   menuAction: action => ipcRenderer.send('menu:action', action),
   resizeUpdateMenu: expanded => ipcRenderer.send('menu:resize-update', expanded),
+  menuReady: () => ipcRenderer.send('menu:ready'),
   subscribeMenuReset: listener => {
     const handler = () => listener();
     ipcRenderer.on('menu:reset', handler);

@@ -42,10 +42,10 @@ function browserPreview(): DesktopAPI {
     setAccountStatus: async () => ({ ok: false, error: '演示数据不可修改' }),
     importFont: async () => ({ ok: false, error: '请在桌面客户端导入字体' }), removeFont: async () => ({ ok: true, value: undefined }),
     drag: () => {}, dragMove: () => {}, hover: () => {},
-    openContextMenu: () => { location.search = '?view=menu'; },
     menuAction: action => { if (action === 'settings') location.search = '?view=settings';
       if (action === 'refresh') { snapshot = { ...snapshot, lastRefresh: Date.now() }; publish(); } },
     resizeUpdateMenu: () => {},
+    menuReady: () => {},
     subscribeMenuReset: () => () => {},
     dismissMenu: () => { location.search = '?view=floating'; },
     closeSettings: () => { location.search = '?view=floating'; }
@@ -55,7 +55,7 @@ function browserPreview(): DesktopAPI {
 if (!window.desktop) window.desktop = browserPreview();
 export const state = ref<Snapshot>(demoState);
 window.desktop.subscribe(value => { state.value = value; });
-void window.desktop.getState().then(value => { if (value) state.value = value; });
+export const stateReady = window.desktop.getState().then(value => { if (value) state.value = value; });
 
 watch(() => [state.value.settings.fontSize, state.value.settings.fontBold], () => {
   document.documentElement.style.setProperty('--floating-size', `${state.value.settings.fontSize}px`);

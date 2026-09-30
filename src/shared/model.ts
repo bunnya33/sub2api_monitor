@@ -59,9 +59,9 @@ export interface DesktopAPI {
   drag(start: boolean, x?: number, y?: number): void;
   dragMove(x: number, y: number): void;
   hover(surface: 'floating' | 'detail', inside: boolean): void;
-  openContextMenu(x: number, y: number, fromTray?: boolean): void;
   menuAction(action: 'settings' | 'refresh' | 'visibility' | 'update' | 'quit'): void;
   resizeUpdateMenu(expanded: boolean): void;
+  menuReady(): void;
   subscribeMenuReset(listener: () => void): () => void;
   dismissMenu(): void;
   closeSettings(): void;

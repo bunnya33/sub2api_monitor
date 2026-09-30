@@ -4,7 +4,7 @@ Windows 桌面浮球，查看 sub2api 0.2.8 接入的 Claude、OpenAI 等上游�
 
 ## 使用
 
-运行 [Sub2API Quota Monitor.exe](release/v0.4.0/win-unpacked/Sub2API%20Quota%20Monitor.exe)，系统托盘右键打开自绘菜单。浮球右键也可打开同一菜单并进入设置。首次启动显示明确标记的演示账号；在「连接」页填写服务器地址、管理员邮箱和密码，若服务器要求双重验证，再输入 6 位验证码。到「账号」页选择账号并填写浮球别名。
+运行 [Sub2API Quota Monitor.exe](release/v0.4.1/win-unpacked/Sub2API%20Quota%20Monitor.exe)，系统托盘右键打开自绘菜单，设置、刷新和更新等操作统一从此进入；浮球右键不弹出菜单。托盘菜单使用任务栏上方的窗口层级，等待内容就绪后单次显示。首次启动显示明确标记的演示账号；在「连接」页填写服务器地址、管理员邮箱和密码，若服务器要求双重验证，再输入 6 位验证码。到「账号」页选择账号并填写浮球别名。
 
 整个浮球区域都可拖动，包括账号名和进度条。拖到当前显示器工作区边缘会收成摘要并轮播账号；悬停查看全部账号和刷新时间。失焦时默认 65% 不透明度，悬停、拖动或查看明细时恢复清晰。设置页包括名称/进度条/贴边宽度、刷新间隔、状态色预览、字号、粗细和 TTF 字体导入。Windows 安装版默认开机自启动，可在「刷新」页关闭。
 
@@ -34,7 +34,7 @@ npm run pack
 
 `npm run pack` 输出 `release/win-unpacked/Sub2API Quota Monitor.exe`，运行时须保留同目录其余文件。`npm run dist:win` 构建安装程序。`npm run test:desktop` 使用隔离的临时配置和本地模拟 sub2api 服务，截图及报告写入 `artifacts/electron-smoke/`；不会连接用户服务器。
 
-发布 GitHub Release 时，标签使用 `v` 前缀的版本号（例如 `v0.4.0`），并上传同一次构建的 `Sub2API-Quota-Monitor-Setup-0.4.0.exe`、`.exe.blockmap` 和 `latest.yml`。保持 Release 附件名与 `latest.yml` 一致；草稿和预发布版本不会推送给正式版客户端。安装包目前未做数字签名，长期分发前应配置 Windows 代码签名。
+发布 GitHub Release 时，标签使用 `v` 前缀的版本号（例如 `v0.4.1`），并上传同一次构建的 `Sub2API-Quota-Monitor-Setup-0.4.1.exe`、`.exe.blockmap` 和 `latest.yml`。保持 Release 附件名与 `latest.yml` 一致；草稿和预发布版本不会推送给正式版客户端。安装包目前未做数字签名，长期分发前应配置 Windows 代码签名。
 
 ## 结构
 

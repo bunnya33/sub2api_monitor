@@ -31,11 +31,6 @@ function up(event: PointerEvent): void {
 function lostCapture(): void {
   if (pressed.value) { pressed.value = false; window.desktop.drag(false); }
 }
-function contextMenu(event: MouseEvent): void {
-  if (props.ghost) return;
-  event.preventDefault();
-  window.desktop.openContextMenu(event.screenX, event.screenY);
-}
 function move(event: PointerEvent): void { if (pressed.value && !props.ghost) window.desktop.dragMove(event.screenX, event.screenY); }
 function hover(inside: boolean): void { if (!props.ghost) window.desktop.hover('floating', inside); }
 function periodLabel(period: Period): string { return period === 'five' ? '5 小时' : '7 天'; }
@@ -46,7 +41,7 @@ function periodLabel(period: Period): string { return period === 'five' ? '5 小
     @pointerdown="down" @pointermove="move"
     @pointerup="up" @lostpointercapture="lostCapture"
     @pointerenter="hover(true)"
-    @pointerleave="hover(false)" @contextmenu="contextMenu">
+    @pointerleave="hover(false)" @contextmenu.prevent>
     <div v-if="collapsed && active" class="dock-content" :class="state.edge === 'left' || state.edge === 'right' ? 'vertical' : 'horizontal'">
       <span class="dock-name" :title="alias(active, state.settings)">{{ shortName(active, state.settings, state.rotatingIndex) }}</span>
       <div class="dock-bars">

@@ -6,6 +6,8 @@ import { clampRect, detailRect, size, snapEdge } from '../shared/geometry';
 import { loginSchema, settingsSchema, type Edge, type LoginInput, type Period, type Rect, type Settings, type Snapshot } from '../shared/model';
 import { Controller } from './controller';
 import { Store, type Configuration } from './store';
+import { trayIcon } from './tray-icon';
+import { Updates } from './updates';
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'quota-font', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 if (process.env.QUOTA_DATA_DIR) {
@@ -18,6 +20,8 @@ if (!single) app.quit();
 let store: Store, config: Configuration, controller: Controller, floating: BrowserWindow;
 let detail: BrowserWindow | null = null, settings: BrowserWindow | null = null, menu: BrowserWindow | null = null;
 let snapPreview: BrowserWindow | null = null, menuBackdrop: BrowserWindow | null = null, tray: Tray;
+let updates: Updates, baseTrayIcon: Electron.NativeImage, menuExpanded = false;
+const MENU_CONFIRM_SPACE = 104;
 let edge: Edge = null, rotatingIndex = 0, rotatingPeriod: Period = 'five', visible = true, overFloating = false, overDetail = false;
 let snapPreviewEdge: Edge = null, menuFromTray = false;
 let dragging = false, dragTimer: NodeJS.Timeout | null = null, leaveTimer: NodeJS.Timeout | null = null, hoverTimer: NodeJS.Timeout | null = null;
@@ -196,7 +200,23 @@ function hover(surface: 'floating' | 'detail', inside: boolean): void {
 }
 function closeMenu(dismissOverflow = false): void {
   if (dismissOverflow && menuFromTray && menu?.isVisible() && !menu.isFocused()) menu.focus();
-  menu?.hide(); menuBackdrop?.hide(); menuFromTray = false;
+  if (menu?.isVisible()) menu.webContents.send('menu:reset');
+  menu?.hide(); menuBackdrop?.hide(); menuFromTray = false; menuExpanded = false;
+}
+function menuHeight(): number {
+  return (controller.state.update.status === 'idle' ? 151 : 183) + (menuExpanded ? MENU_CONFIRM_SPACE : 0);
+}
+function syncMenuHeight(): void {
+  if (!menu?.isVisible()) return;
+  const old = menu.getBounds(), height = menuHeight();
+  if (old.height === height) return;
+  const work = displayFor(old).workArea;
+  menu.setBounds(clampRect({ ...old, y: old.y + old.height - height, height }, work));
+}
+function resizeMenu(expanded: boolean): void {
+  if (!menu?.isVisible() || menuExpanded === expanded) return;
+  menuExpanded = expanded;
+  syncMenuHeight();
 }
 function showMenuBackdrop(x: number, y: number): void {
   if (!menuBackdrop || menuBackdrop.isDestroyed()) {
@@ -210,15 +230,16 @@ function showMenuBackdrop(x: number, y: number): void {
 }
 function openMenu(x: number, y: number, fromTray = false): void {
   if (fromTray && menu?.isVisible() && menuFromTray) { closeMenu(true); return; }
+  menuExpanded = false;
   menuFromTray = fromTray;
   if (!menu || menu.isDestroyed()) {
-    menu = makeWindow(176, 164, true);
+    menu = makeWindow(176, menuHeight(), true);
     url(menu, 'menu');
     menu.on('blur', () => { if (!menu?.webContents.isDevToolsOpened()) closeMenu(); });
     menu.on('closed', () => { menu = null; });
   }
   const work = screen.getDisplayNearestPoint({ x, y }).workArea;
-  menu.setBounds(clampRect({ x, y, width: 176, height: 164 }, work));
+  menu.setBounds(clampRect({ x, y, width: 176, height: menuHeight() }, work));
   if (fromTray) {
     showMenuBackdrop(x, y); menu.showInactive(); menu.moveTop();
     setTimeout(() => { if (menuFromTray && menu?.isVisible()) menu.moveTop(); }, 60);
@@ -237,11 +258,12 @@ function openSettings(): void {
   }
   settings.show(); settings.focus(); publish();
 }
-function menuAction(action: 'settings' | 'refresh' | 'visibility' | 'quit'): void {
+function menuAction(action: 'settings' | 'refresh' | 'visibility' | 'update' | 'quit'): void {
   closeMenu(true);
   if (action === 'settings') openSettings();
   if (action === 'refresh') void controller.refresh();
   if (action === 'visibility') { visible = !visible; if (visible) floating.showInactive(); else { hideDetail(); floating.hide(); } publish(); }
+  if (action === 'update') void updates.confirm();
   if (action === 'quit') app.quit();
 }
 function setupIpc(): void {
@@ -310,7 +332,8 @@ function setupIpc(): void {
     if (senderView(event) !== 'floating') return;
     overFloating = false; hideDetail(); openMenu(x, y, fromTray === true);
   });
-  ipcMain.on('menu:action', (event, action: 'settings' | 'refresh' | 'visibility' | 'quit') => { if (senderView(event) === 'menu') menuAction(action); });
+  ipcMain.on('menu:action', (event, action: 'settings' | 'refresh' | 'visibility' | 'update' | 'quit') => { if (senderView(event) === 'menu') menuAction(action); });
+  ipcMain.on('menu:resize-update', (event, expanded: boolean) => { if (senderView(event) === 'menu') resizeMenu(expanded === true); });
   ipcMain.on('menu:dismiss', event => { if (senderView(event) === 'menu-backdrop') closeMenu(); });
   ipcMain.on('settings:close', event => { if (senderView(event) === 'settings') settings?.hide(); });
 }
@@ -334,12 +357,20 @@ app.whenReady().then(() => {
   floating.setBounds(clampRect({ x: config.position?.x ?? work.x + Math.round(work.width / 3),
     y: config.position?.y ?? work.y + Math.round(work.height / 4), ...initial }, work, edge));
   floating.showInactive(); floating.setAlwaysOnTop(true, 'floating');
-  const icon = nativeImage.createFromPath(path.join(app.getAppPath(), 'assets/app.png'));
-  tray = new Tray(icon);
+  baseTrayIcon = nativeImage.createFromPath(path.join(app.getAppPath(), 'assets/app.png'));
+  tray = new Tray(trayIcon(baseTrayIcon, false));
   tray.setToolTip('Sub2API Quota Monitor');
-  tray.on('right-click', () => { const cursor = screen.getCursorScreenPoint(); openMenu(cursor.x, cursor.y - 164, true); });
-  tray.on('click', () => { const cursor = screen.getCursorScreenPoint(); openMenu(cursor.x, cursor.y - 164, true); });
+  tray.on('right-click', () => { const cursor = screen.getCursorScreenPoint(); openMenu(cursor.x, cursor.y - menuHeight(), true); });
+  tray.on('click', () => { const cursor = screen.getCursorScreenPoint(); openMenu(cursor.x, cursor.y - menuHeight(), true); });
   setupIpc();
+  updates = new Updates(state => {
+    controller.state.update = state;
+    tray.setImage(trayIcon(baseTrayIcon, state.status !== 'idle'));
+    tray.setToolTip(state.version ? `Sub2API Quota Monitor · 新版本 ${state.version}` : 'Sub2API Quota Monitor');
+    syncMenuHeight();
+    publish();
+  }, process.env.QUOTA_DATA_DIR ? process.env.QUOTA_TEST_UPDATE_VERSION : undefined);
+  updates.start();
   controller.on('state', () => { resizeFloating(); publish(); });
   screen.on('display-metrics-changed', () => resizeFloating());
   screen.on('display-removed', () => resizeFloating());
@@ -359,5 +390,6 @@ app.whenReady().then(() => {
 });
 app.on('before-quit', () => {
   for (const timer of [dragTimer, opacityTimer, leaveTimer, hoverTimer, rotationTimer]) if (timer) clearInterval(timer);
+  updates?.stop();
   controller?.dispose();
 });

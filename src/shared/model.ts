@@ -36,10 +36,11 @@ export interface Quota extends Account {
   resetCredits: ResetCredits | null; resetCreditsError: string | null;
 }
 export interface Connection { status: 'demo' | 'disconnected' | 'authenticating' | 'twoFactor' | 'connected' | 'expired' | 'error'; server: string; email: string; message: string }
+export interface UpdateState { status: 'idle' | 'available' | 'downloading' | 'downloaded'; version: string | null; progress: number; error: string | null }
 export interface Snapshot {
   settings: Settings; connection: Connection; available: Account[]; quotas: Quota[];
   busy: boolean; lastRefresh: number | null; nextRefresh: number | null; error: string | null;
-  edge: Edge; collapsed: boolean; rotatingIndex: number; rotatingPeriod: Period; visible: boolean;
+  edge: Edge; collapsed: boolean; rotatingIndex: number; rotatingPeriod: Period; visible: boolean; update: UpdateState;
 }
 export type Result<T = void> = { ok: true; value: T } | { ok: false; error: string };
 export const loginSchema = z.object({ server: z.string().min(1).max(2048), email: z.email(), password: z.string().min(1).max(4096) });
@@ -59,7 +60,9 @@ export interface DesktopAPI {
   dragMove(x: number, y: number): void;
   hover(surface: 'floating' | 'detail', inside: boolean): void;
   openContextMenu(x: number, y: number, fromTray?: boolean): void;
-  menuAction(action: 'settings' | 'refresh' | 'visibility' | 'quit'): void;
+  menuAction(action: 'settings' | 'refresh' | 'visibility' | 'update' | 'quit'): void;
+  resizeUpdateMenu(expanded: boolean): void;
+  subscribeMenuReset(listener: () => void): () => void;
   dismissMenu(): void;
   closeSettings(): void;
 }

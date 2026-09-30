@@ -28,7 +28,7 @@ body { background: transparent; color: var(--text); user-select: none; letter-sp
 .browser-preview .floating, .browser-preview .shell { box-shadow: 0 7px 24px #142d1d28; }
 .browser-preview .settings { width: min(520px, calc(100vw - 24px)); height: min(568px, calc(100vh - 24px)); }
 .browser-preview .detail { width: min(320px, calc(100vw - 24px)); height: min(var(--detail-height), calc(100vh - 24px)); }
-.browser-preview .menu { width: 176px; height: 164px; }
+.browser-preview .menu { width: 176px; height: auto; }
 button, input, select { font: inherit; letter-spacing: 0; }
 button { cursor: pointer; color: inherit; }
 button:disabled { cursor: default; opacity: .5; }
@@ -105,7 +105,9 @@ input, select { color: var(--text); }
 .detail-foot span { overflow: hidden; text-overflow: ellipsis; }
 .empty-note { padding: 16px 12px; color: var(--muted); }
 .error { color: var(--danger) !important; }
-.menu { padding: 5px; display: flex; flex-direction: column; }
+.menu { width: 100%; height: 100%; }
+.menu.expanded { padding-top: 104px; }
+.menu-content { height: auto; padding: 5px; display: flex; flex-direction: column; overflow: visible; }
 .menu-backdrop { width: 100%; height: 100%; background: transparent; }
 .menu button { height: 32px; min-height: 32px; width: 100%; display: flex; align-items: center; gap: 9px; padding: 0 8px; border: 0; border-radius: 3px; background: transparent; text-align: left; }
 .menu .el-button { margin: 0; justify-content: flex-start; color: var(--text); }

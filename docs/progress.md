@@ -1,5 +1,12 @@
 # 开发进度
 
+## v0.4.0 更新提示
+
+- 使用 `electron-updater` 检查公开 GitHub Releases，安装版启动后延迟一分钟、之后每 12 小时检查；关闭自动下载和退出时自动安装。
+- 新版本出现时托盘图标合成红点，右键菜单显示版本号。Element Plus Popconfirm 确认后才下载；下载完成后再次确认重启安装。无更新时菜单高度收紧，上下留白一致。
+- 隔离桌面测试覆盖发现新版、菜单高度、确认弹层、取消与确认下载；真实 GitHub 发布下载和安装需在首次 Release 发布后验证。旧 0.3.0 客户端没有更新器，需手动安装 0.4.0。
+- `npm run typecheck`、`npm test`（27 项）、构建及 0.4.0 打包版桌面测试通过。安装包、blockmap 和 `latest.yml` 保存在 `release/v0.4.0/`，清单中的文件名、大小及 SHA-512 已与安装包逐项核对；安装包未签名。
+
 ## 当前主线：Electron
 
 - 当前渲染层为 Vue 3 + Element Plus + TypeScript，桌面功能由 Electron 提供；WPF 实现保留在当前仓库，并加标签 `wpf-baseline` 指向 `ee75647`。

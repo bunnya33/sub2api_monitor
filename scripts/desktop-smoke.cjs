@@ -167,6 +167,7 @@ const path = require('node:path');
     assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('view=detail')).isVisible()), false);
     checks.push('floating context menu immediately closes quota details');
     assert.equal(await menu.locator('.menu button').count(), 4); checks.push('custom floating context menu');
+    assert.equal((await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('view=menu')).getBounds())).height, 151);
     const settingsWindow = app.waitForEvent('window', { predicate: window => window.url().includes('view=settings'), timeout: 5000 });
     await menu.getByRole('menuitem', { name: '设置' }).click();
     const settings = await settingsWindow;
@@ -556,6 +557,43 @@ const path = require('node:path');
     assert.equal(migrated.settings.concurrencyWidth, 36);
     assert.equal(migrated.settings.autoStart, true);
     checks.push('older default top width migrates to 160px while custom side width remains');
+    await activeApp.close(); activeApp = null;
+    const updateData = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-update-menu-'));
+    activeApp = await _electron.launch({ executablePath,
+      args: process.env.QUOTA_EXECUTABLE ? [] : [root],
+      env: { ...process.env, QUOTA_DATA_DIR: updateData, QUOTA_TEST_UPDATE_VERSION: '9.9.9' } });
+    const updateFloat = await activeApp.firstWindow();
+    await updateFloat.waitForFunction(async () => (await window.desktop.getState()).update.status === 'available');
+    const updateMenuWindow = activeApp.waitForEvent('window', { predicate: window => /[?&]view=menu(?:&|$)/.test(window.url()), timeout: 5000 });
+    const updateBackdropWindow = activeApp.waitForEvent('window', { predicate: window => window.url().includes('view=menu-backdrop'), timeout: 5000 });
+    await updateFloat.evaluate(() => window.desktop.openContextMenu(500, 300, true));
+    const updateMenu = await updateMenuWindow;
+    await updateBackdropWindow;
+    await updateMenu.getByRole('menuitem', { name: '更新到 v9.9.9' }).waitFor();
+    const menuGeometry = await updateMenu.locator('.menu-content').evaluate(element => ({
+      height: element.getBoundingClientRect().height,
+      firstTop: element.querySelector('button').getBoundingClientRect().top,
+      lastBottom: [...element.querySelectorAll('button')].at(-1).getBoundingClientRect().bottom,
+      top: element.getBoundingClientRect().top, bottom: element.getBoundingClientRect().bottom
+    }));
+    assert.ok(Math.abs((menuGeometry.firstTop - menuGeometry.top) - (menuGeometry.bottom - menuGeometry.lastBottom)) <= 2,
+      `menu padding is unbalanced: ${JSON.stringify(menuGeometry)}`);
+    assert.equal((await activeApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(w => /[?&]view=menu(?:&|$)/.test(w.webContents.getURL())).getBounds())).height, 183);
+    await updateMenu.screenshot({ path: path.join(output, 'menu-with-update.png') });
+    await updateMenu.getByRole('menuitem', { name: '更新到 v9.9.9' }).click();
+    await updateMenu.locator('.el-popconfirm').waitFor();
+    await updateMenu.waitForFunction(() => document.querySelector('.menu')?.classList.contains('expanded'));
+    assert.equal((await activeApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(w => /[?&]view=menu(?:&|$)/.test(w.webContents.getURL())).getBounds())).height, 287);
+    await updateMenu.screenshot({ path: path.join(output, 'menu-update-confirm.png') });
+    await updateMenu.getByRole('button', { name: '取消' }).click();
+    assert.equal((await updateFloat.evaluate(() => window.desktop.getState())).update.status, 'available');
+    await updateMenu.getByRole('menuitem', { name: '更新到 v9.9.9' }).click();
+    await updateMenu.getByRole('button', { name: '确认' }).click();
+    await updateFloat.waitForFunction(async () => (await window.desktop.getState()).update.status === 'downloading');
+    await updateFloat.evaluate(() => window.desktop.openContextMenu(500, 300));
+    await updateMenu.getByRole('menuitem', { name: '下载更新 0%' }).waitFor();
+    assert.equal(await updateMenu.locator('.menu.expanded').count(), 0);
+    checks.push('update badge state, balanced menu and Popconfirm gate downloads');
     fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks }, null, 2));
     console.log(JSON.stringify({ passed: true, checks }, null, 2));
   } catch (error) {

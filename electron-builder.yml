@@ -1,5 +1,9 @@
 appId: com.sub2api.quota-monitor
 productName: Sub2API Quota Monitor
+publish:
+  - provider: github
+    owner: bunnya33
+    repo: sub2api_monitor
 electronDist: node_modules/electron/dist
 directories:
   output: release
@@ -12,4 +16,6 @@ win:
     - target: nsis
       arch: [x64]
   icon: assets/app.ico
+nsis:
+  artifactName: Sub2API-Quota-Monitor-Setup-${version}.${ext}
 asar: true

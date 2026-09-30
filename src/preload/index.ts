@@ -21,6 +21,12 @@ const api: DesktopAPI = {
   hover: (surface, inside) => ipcRenderer.send('hover', surface, inside),
   openContextMenu: (x, y, fromTray = false) => ipcRenderer.send('context-menu', x, y, fromTray),
   menuAction: action => ipcRenderer.send('menu:action', action),
+  resizeUpdateMenu: expanded => ipcRenderer.send('menu:resize-update', expanded),
+  subscribeMenuReset: listener => {
+    const handler = () => listener();
+    ipcRenderer.on('menu:reset', handler);
+    return () => ipcRenderer.removeListener('menu:reset', handler);
+  },
   dismissMenu: () => ipcRenderer.send('menu:dismiss'),
   closeSettings: () => ipcRenderer.send('settings:close')
 };

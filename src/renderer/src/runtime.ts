@@ -7,7 +7,8 @@ if (preview) document.body.classList.add('browser-preview');
 
 const demoState: Snapshot = { settings: defaults, connection: { status: 'demo', server: '', email: '', message: '演示数据' },
   available: [], quotas: [], busy: false, lastRefresh: null, nextRefresh: null, error: null,
-  edge: null, collapsed: false, rotatingIndex: 0, rotatingPeriod: 'five', visible: true };
+  edge: null, collapsed: false, rotatingIndex: 0, rotatingPeriod: 'five', visible: true,
+  update: { status: 'idle', version: null, progress: 0, error: null } };
 
 function browserPreview(): DesktopAPI {
   const now = Date.now();
@@ -44,6 +45,8 @@ function browserPreview(): DesktopAPI {
     openContextMenu: () => { location.search = '?view=menu'; },
     menuAction: action => { if (action === 'settings') location.search = '?view=settings';
       if (action === 'refresh') { snapshot = { ...snapshot, lastRefresh: Date.now() }; publish(); } },
+    resizeUpdateMenu: () => {},
+    subscribeMenuReset: () => () => {},
     dismissMenu: () => { location.search = '?view=floating'; },
     closeSettings: () => { location.search = '?view=floating'; }
   };

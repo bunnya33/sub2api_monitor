@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue';
-import { ElButton, ElColorPicker, ElInput, ElInputNumber, ElOption, ElSelect, ElSlider, ElSwitch } from 'element-plus';
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { ElButton, ElColorPicker, ElInput, ElInputNumber, ElOption, ElPopconfirm, ElSelect, ElSlider, ElSwitch } from 'element-plus';
 import { Close, Delete, Refresh, Upload } from '@element-plus/icons-vue';
 import type { Settings as SettingsData, Snapshot } from '../../shared/model';
-import { platform, time } from './runtime';
+import { platform, resetCountText, supportsResetCards, time } from './runtime';
 import Meter from './Meter.vue';
 
 const props = defineProps<{ state: Snapshot }>();
@@ -33,7 +33,13 @@ const tab = ref<Tab>('display');
 const opacityDraft = ref(props.state.settings.inactiveOpacity);
 const server = ref(''), email = ref(''), password = ref(''), otp = ref('');
 const message = ref('');
+const resettingId = ref<number | null>(null);
+const resetMessage = ref<{ id: number; text: string; error: boolean } | null>(null);
 const aliasDraft = reactive<Record<string, string>>({});
+function syncAccountsVisibility(): void { window.desktop.setAccountsVisible(tab.value === 'accounts' && !document.hidden); }
+watch(tab, syncAccountsVisibility);
+onMounted(() => { document.addEventListener('visibilitychange', syncAccountsVisibility); syncAccountsVisibility(); });
+onUnmounted(() => { document.removeEventListener('visibilitychange', syncAccountsVisibility); window.desktop.setAccountsVisible(false); });
 watch(() => props.state.settings.inactiveOpacity, value => { opacityDraft.value = value; });
 watch(() => [props.state.connection.server, props.state.connection.email], () => {
   if (props.state.connection.server && !server.value) server.value = props.state.connection.server;
@@ -91,6 +97,15 @@ function selectAccount(id: number, selected: boolean): void {
 function saveAlias(id: number): void {
   const key = String(id), value = aliasDraft[key]?.trim() ?? '';
   if (value !== (props.state.settings.aliases[key] ?? '')) void update({ aliases: { ...props.state.settings.aliases, [key]: value } });
+}
+async function resetQuota(id: number): Promise<void> {
+  if (resettingId.value !== null) return;
+  resettingId.value = id; resetMessage.value = null;
+  try {
+    const result = await window.desktop.resetAccountQuota(id);
+    resetMessage.value = { id, text: result.ok ? result.value : result.error, error: !result.ok };
+  } catch { resetMessage.value = { id, text: '重置结果未确认，请先刷新次数', error: true }; }
+  finally { resettingId.value = null; }
 }
 function blurOnEnter(event: Event): void { (event.target as HTMLElement).blur(); }
 const close = () => window.desktop.closeSettings();
@@ -169,6 +184,17 @@ const logout = () => void window.desktop.logout();
           <div class="account-select"><ElSwitch :model-value="state.settings.selectedIds.includes(account.id)" :aria-label="`选择${account.name}`" @change="value => selectAccount(account.id, Boolean(value))" />
             <span><strong :title="account.name">{{ account.name }}</strong><small>{{ platform(account.platform) }} · {{ account.type }}{{ account.planType ? ` · ${account.planType}` : '' }} · {{ account.status }}</small></span>
           </div>
+          <div class="account-credits"><span>重置次数 <strong :title="account.resetCreditsError || '当前可用的重置次数'">{{ resetCountText(account) }}</strong></span>
+            <ElPopconfirm v-if="supportsResetCards(account) && (account.resetCredits?.available ?? 0) > 0"
+              :title="`确认重置「${state.settings.aliases[String(account.id)] || account.name}」的额度？将消耗 1 次重置机会。`"
+              :width="260" placement="top" confirm-button-text="确认重置" cancel-button-text="取消" @confirm="resetQuota(account.id)">
+              <template #reference><ElButton size="small" :icon="Refresh" :loading="resettingId === account.id"
+                :disabled="state.connection.status !== 'connected' || state.busy || resettingId !== null || !!account.parentAccountId || !!account.resetCreditsError"
+                :title="account.parentAccountId ? '影子账号请在母账号上重置' : account.resetCreditsError || (state.connection.status !== 'connected' ? '管理员登录后可重置' : '使用一张重置卡重置额度')">重置额度</ElButton></template>
+            </ElPopconfirm>
+          </div>
+          <div v-if="account.resetCreditsError" class="account-reset-message error">次数更新失败：{{ account.resetCreditsError }}</div>
+          <div v-if="resetMessage?.id === account.id" class="account-reset-message" :class="{ error: resetMessage.error }" role="status">{{ resetMessage.text }}</div>
           <label class="alias-field">别名<ElInput v-model="aliasDraft[String(account.id)]" maxlength="40" placeholder="浮球显示名称" @blur="saveAlias(account.id)" @keydown.enter="blurOnEnter" /></label>
         </div></template>
         <div v-else class="empty-note">登录后可选择上游账号并设置别名</div>

@@ -3,7 +3,8 @@ import { emptyQuota, type Account, type LoginInput, type Quota, type QuotaWindow
 
 const accountSchema = z.object({ id: z.number().int().positive(), name: z.string(), platform: z.string(), type: z.string(), status: z.string().default('active'),
   credentials: z.record(z.string(), z.unknown()).nullish(), parent_plan_type: z.string().nullish(), parent_subscription_expires_at: z.string().nullish(),
-  concurrency: z.number().int().nonnegative().nullish(), current_concurrency: z.number().int().nonnegative().nullish() });
+  concurrency: z.number().int().nonnegative().nullish(), current_concurrency: z.number().int().nonnegative().nullish(),
+  parent_account_id: z.number().int().positive().nullish(), extra: z.record(z.string(), z.unknown()).nullish() });
 const tokenSchema = z.object({ access_token: z.string().min(1), refresh_token: z.string().optional(), expires_in: z.number().optional() });
 const userSchema = z.object({ role: z.string(), email: z.string().optional() });
 export interface SavedSession { server: string; email: string; refreshToken: string }
@@ -11,7 +12,7 @@ export interface SessionVault { save(value: SavedSession): void; load(): SavedSe
 export type Fetcher = (url: string, init?: RequestInit) => Promise<Response>;
 export class ApiError extends Error {
   constructor(message: string, public status = 0, public retryAfterMs = 0, public reason = '') { super(message); }
-  get sessionError(): boolean { return [401, 403].includes(this.status) && this.reason !== 'OPENAI_QUOTA_UPSTREAM_ERROR'; }
+  get sessionError(): boolean { return [401, 403].includes(this.status) && !['OPENAI_QUOTA_UPSTREAM_ERROR', 'OPENAI_QUOTA_RESET_UPSTREAM_ERROR'].includes(this.reason); }
 }
 export function normalizeServer(value: string): string {
   const url = new URL(value.trim());
@@ -52,12 +53,12 @@ export class Sub2ApiClient {
   private refreshTask: Promise<void> | null = null;
   private email = '';
   constructor(server: string, private vault: SessionVault, private remember: boolean, private fetcher: Fetcher = fetch) { this.server = normalizeServer(server); }
-  private async raw(path: string, body?: unknown, token?: string, signal?: AbortSignal, method: 'POST' | 'PUT' = 'POST'): Promise<unknown> {
+  private async raw(path: string, body?: unknown, token?: string, signal?: AbortSignal, method: 'GET' | 'POST' | 'PUT' = body === undefined ? 'GET' : 'POST', timeoutMs = 20000): Promise<unknown> {
     let response: Response;
     try {
-      const timeout = AbortSignal.timeout(20000);
+      const timeout = AbortSignal.timeout(timeoutMs);
       response = await this.fetcher(this.server + '/api/v1' + path, {
-        method: body === undefined ? 'GET' : method, redirect: 'error', signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+        method, redirect: 'error', signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
         headers: { Accept: 'application/json', ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(token ? { Authorization: 'Bearer ' + token } : {}) },
         body: body === undefined ? undefined : JSON.stringify(body)
       });
@@ -120,13 +121,13 @@ export class Sub2ApiClient {
     })().finally(() => { this.refreshTask = null; });
     return this.refreshTask;
   }
-  private async request(path: string, signal?: AbortSignal, body?: unknown, method: 'POST' | 'PUT' = 'POST'): Promise<unknown> {
+  private async request(path: string, signal?: AbortSignal, body?: unknown, method: 'GET' | 'POST' | 'PUT' = body === undefined ? 'GET' : 'POST', timeoutMs = 20000, retryUnauthorized = true): Promise<unknown> {
     if (this.expiresAt < Date.now() + 15000) await this.refreshTokens(this.accessToken, signal);
     const attempted = this.accessToken;
-    try { return await this.raw(path, body, attempted, signal, method); }
+    try { return await this.raw(path, body, attempted, signal, method, timeoutMs); }
     catch (error) {
-      if (!(error instanceof ApiError) || error.status !== 401 || !error.sessionError || !this.refreshToken) throw error;
-      await this.refreshTokens(attempted, signal); return this.raw(path, body, this.accessToken, signal, method);
+      if (!retryUnauthorized || !(error instanceof ApiError) || error.status !== 401 || !error.sessionError || !this.refreshToken) throw error;
+      await this.refreshTokens(attempted, signal); return this.raw(path, body, this.accessToken, signal, method, timeoutMs);
     }
   }
   async listAccounts(signal?: AbortSignal): Promise<Account[]> {
@@ -139,6 +140,8 @@ export class Sub2ApiClient {
         const expiryTime = expires ? Date.parse(expires) : NaN;
         return { id: item.id, name: item.name, platform: item.platform, type: item.type, status: item.status,
           concurrency: item.concurrency ?? null, currentConcurrency: item.current_concurrency ?? null,
+          parentAccountId: item.parent_account_id ?? null,
+          resetCredits: mapResetCredits({ rate_limit_reset_credits: item.extra?.codex_reset_credit_snapshot }), resetCreditsError: null,
           planType: typeof item.credentials?.plan_type === 'string' && item.credentials.plan_type.trim() ? item.credentials.plan_type.trim() : item.parent_plan_type || undefined,
           subscriptionExpiresAt: Number.isFinite(expiryTime) ? expiryTime : null };
       }));
@@ -149,6 +152,17 @@ export class Sub2ApiClient {
   async setAccountStatus(id: number, status: 'active' | 'inactive', signal?: AbortSignal): Promise<void> {
     const result = z.object({ status: z.string() }).parse(await this.request(`/admin/accounts/${id}`, signal, { status }, 'PUT'));
     if (result.status !== status) throw new ApiError('服务器未确认账号状态更新');
+  }
+  async getResetCredits(id: number, signal?: AbortSignal): Promise<ResetCredits | null> {
+    return mapResetCredits(await this.request(`/admin/openai/accounts/${id}/quota`, signal));
+  }
+  async resetAccountQuota(id: number, signal?: AbortSignal): Promise<{ windowsReset: number; warning: string | null }> {
+    const raw = await this.request(`/admin/openai/accounts/${id}/reset-quota`, signal, undefined, 'POST', 90000, false);
+    const result = z.object({ code: z.string(), windows_reset: z.number().int().nonnegative(), warning_code: z.string().nullish() }).safeParse(raw);
+    if (!result.success) throw new ApiError('服务器未确认重置结果，请刷新次数后再操作');
+    const warnings: Record<string, string> = { reset_credit_cache_refresh_failed: '重置已完成，服务端次数缓存未刷新',
+      account_state_recovery_failed: '重置已完成，账号状态恢复失败', account_state_refresh_failed: '重置已完成，账号状态尚未更新' };
+    return { windowsReset: result.data.windows_reset, warning: result.data.warning_code ? warnings[result.data.warning_code] ?? '重置已完成，部分数据未刷新' : null };
   }
   async usages(accounts: Account[], signal?: AbortSignal): Promise<{ usage: Map<number, Quota>; errors: Map<number, string>; retryAfterMs: number }> {
     const usage = new Map<number, Quota>(), errors = new Map<number, string>();
@@ -161,7 +175,7 @@ export class Sub2ApiClient {
         const mapped = mapUsage(account, data);
         if (mapped.error) { errors.set(account.id, mapped.error); continue; }
         if (account.platform === 'openai' && account.type === 'oauth') {
-          try { mapped.resetCredits = mapResetCredits(await this.request(`/admin/openai/accounts/${account.id}/quota`, signal)); }
+          try { mapped.resetCredits = await this.getResetCredits(account.id, signal); }
           catch (error) {
             if (signal?.aborted) throw error;
             if (error instanceof ApiError && error.sessionError) throw error;

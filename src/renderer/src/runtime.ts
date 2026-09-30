@@ -40,6 +40,7 @@ function browserPreview(): DesktopAPI {
     login: async () => ({ ok: false, error: '请在桌面客户端登录服务器' }), verify: async () => ({ ok: false, error: '请在桌面客户端验证' }),
     logout: async () => ({ ok: true, value: undefined }), refresh: async () => { snapshot = { ...snapshot, lastRefresh: Date.now() }; publish(); return { ok: true, value: undefined }; },
     setAccountStatus: async () => ({ ok: false, error: '演示数据不可修改' }),
+    setAccountsVisible: () => {}, resetAccountQuota: async () => ({ ok: false, error: '演示数据不可重置' }),
     importFont: async () => ({ ok: false, error: '请在桌面客户端导入字体' }), removeFont: async () => ({ ok: true, value: undefined }),
     drag: () => {}, dragMove: () => {}, hover: () => {},
     menuAction: action => { if (action === 'settings') location.search = '?view=settings';
@@ -72,9 +73,9 @@ watch(() => state.value.settings.fontName, (fontName, _, onCleanup) => {
 
 export const platform = (value: string) => value === 'anthropic' ? 'Claude' : value === 'openai' ? 'OpenAI' : value;
 export const time = (value: number | null) => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '--';
-export const supportsResetCards = (account: Quota) => account.platform === 'openai' && account.type === 'oauth';
+export const supportsResetCards = (account: Pick<Quota, 'platform' | 'type'>) => account.platform === 'openai' && account.type === 'oauth';
 export const showResetExpiry = (account: Quota) => supportsResetCards(account) && account.resetCredits?.available !== 0;
-export const resetCountText = (account: Quota) => !supportsResetCards(account) || account.resetCredits?.available === 0
+export const resetCountText = (account: Pick<Quota, 'platform' | 'type'> & { resetCredits?: Quota['resetCredits'] }) => !supportsResetCards(account) || account.resetCredits?.available === 0
   ? '无重置卡' : account.resetCredits ? `${account.resetCredits.available} 次` : '--';
 export const subscription = (value?: string) => {
   if (!value) return '--';

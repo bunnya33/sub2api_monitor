@@ -27,7 +27,8 @@ export type Edge = 'left' | 'right' | 'top' | 'bottom' | null;
 export type Period = 'five' | 'seven';
 export interface Rect { x: number; y: number; width: number; height: number }
 export interface Account { id: number; name: string; platform: string; type: string; status: string; planType?: string; subscriptionExpiresAt?: number | null;
-  concurrency?: number | null; currentConcurrency?: number | null }
+  concurrency?: number | null; currentConcurrency?: number | null; parentAccountId?: number | null;
+  resetCredits?: ResetCredits | null; resetCreditsError?: string | null }
 export interface QuotaWindow { used: number; resetsAt: number | null }
 export interface ResetCredits { available: number; nearestExpiresAt: number | null }
 export interface Quota extends Account {
@@ -54,6 +55,8 @@ export interface DesktopAPI {
   logout(): Promise<Result>;
   refresh(): Promise<Result>;
   setAccountStatus(id: number, status: 'active' | 'inactive'): Promise<Result>;
+  setAccountsVisible(visible: boolean): void;
+  resetAccountQuota(id: number): Promise<Result<string>>;
   importFont(): Promise<Result<string>>;
   removeFont(): Promise<Result>;
   drag(start: boolean, x?: number, y?: number): void;

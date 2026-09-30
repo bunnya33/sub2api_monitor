@@ -301,7 +301,7 @@ function openSettings(): void {
     settings.setResizable(true); settings.setMinimumSize(470, 420);
     settings.setAlwaysOnTop(false); settings.setSkipTaskbar(false);
     settings.center(); url(settings, 'settings');
-    settings.on('closed', () => { settings = null; });
+    settings.on('closed', () => { controller.setAccountsVisible(false); settings = null; });
   }
   settings.show(); settings.focus(); publish();
 }
@@ -346,6 +346,13 @@ function setupIpc(): void {
     try { await controller.setAccountStatus(id, status); return { ok: true, value: undefined }; }
     catch (error) { return { ok: false, error: error instanceof Error ? error.message : '更新账号状态失败' }; }
   });
+  ipcMain.on('accounts:visible', (event, visible: boolean) => { if (senderView(event) === 'settings') controller.setAccountsVisible(visible === true); });
+  ipcMain.handle('account:reset-quota', async (event, id: number) => {
+    if (senderView(event) !== 'settings') return { ok: false, error: '无效窗口' };
+    if (!Number.isSafeInteger(id) || id <= 0) return { ok: false, error: '账号参数无效' };
+    try { return { ok: true, value: await controller.resetAccountQuota(id) }; }
+    catch (error) { return { ok: false, error: error instanceof Error ? error.message : '重置失败' }; }
+  });
   ipcMain.handle('font:import', async event => {
     if (senderView(event) !== 'settings') return { ok: false, error: '无效窗口' };
     const choice = await dialog.showOpenDialog(settings!, { title: '导入 TTF 字体', properties: ['openFile'], filters: [{ name: 'TrueType 字体', extensions: ['ttf'] }] });
@@ -379,7 +386,7 @@ function setupIpc(): void {
   ipcMain.on('menu:ready', event => { if (senderView(event) === 'menu') { popupRendered.get(event.sender)?.(); popupRendered.delete(event.sender); } });
   ipcMain.on('menu:resize-update', (event, expanded: boolean) => { if (senderView(event) === 'menu') resizeMenu(expanded === true); });
   ipcMain.on('menu:dismiss', event => { if (senderView(event) === 'menu-backdrop') closeMenu(); });
-  ipcMain.on('settings:close', event => { if (senderView(event) === 'settings') settings?.hide(); });
+  ipcMain.on('settings:close', event => { if (senderView(event) === 'settings') { controller.setAccountsVisible(false); settings?.hide(); } });
 }
 
 app.on('second-instance', () => { if (floating) { visible = true; floating.showInactive(); openSettings(); } });

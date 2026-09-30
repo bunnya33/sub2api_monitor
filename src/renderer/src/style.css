@@ -161,6 +161,10 @@ input, select { color: var(--text); }
 .account-setting { padding: 9px 0 10px; border-bottom: 1px solid var(--line); }
 .account-select { display: flex; align-items: center; gap: 9px; min-width: 0; }
 .account-select > span { min-width: 0; }
+.account-credits { margin: 7px 0 0 49px; display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 11px; min-height: 24px; }
+.account-credits strong { margin-left: 5px; color: var(--text); font-weight: 600; }
+.account-reset-message { margin: 5px 0 0 49px; font-size: 11px; color: #187552; overflow-wrap: anywhere; }
+.account-reset-message.error { color: var(--danger); }
 .account-select strong { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .account-select small { display: block; margin-top: 2px; color: var(--muted); }
 .alias-field { margin: 8px 0 0 24px; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; }

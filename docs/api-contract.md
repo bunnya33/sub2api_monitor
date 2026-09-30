@@ -13,6 +13,7 @@
 | GET | `/api/v1/admin/accounts/{id}/usage?source=passive&force=false` | Claude OAuth / setup-token 的被动额度 |
 | GET | `/api/v1/admin/accounts/{id}/usage?source=active&force=false` | 其他账号沿用服务端查询和缓存 |
 | GET | `/api/v1/admin/openai/accounts/{id}/quota` | OpenAI OAuth 的可用重置卡及到期时间 |
+| POST | `/api/v1/admin/openai/accounts/{id}/reset-quota` | 用户确认后消耗一张重置卡重置上游额度；请求无正文，最长等待 90 秒 |
 | PUT | `/api/v1/admin/accounts/{id}` | 管理员仅提交 `{status:"active"|"inactive"}` 更新账号状态 |
 
 管理员接口使用 `Authorization: Bearer <access_token>`。普通推理 Key 不适用。响应外层采用 sub2api 的 `{code, message, data}`；错误响应与 HTTP 状态都要处理。
@@ -23,11 +24,15 @@
 
 服务端时间和本次客户端读取时间在内部保留，详情不再展示这两个账号时间；缺失窗口显示 `--`。单账号失败保留旧成功数据及旧时间，其他账号继续更新。429 暂停本轮后续账号请求，遵守 `Retry-After`；缺省至少等待 30 秒。
 
-OpenAI OAuth 每轮额外读取 `/admin/openai/accounts/{id}/quota`。详情中的“重置次数”取 `rate_limit_reset_credits.available_count`，表示当前可用次数；“最近重置卡到期”取同一响应 `credits[].expires_at` 中最近的未过期时间。确认 0 次或账号平台不支持重置卡时显示“无重置卡”，不显示到期行。OpenAI 查询失败或缺失次数保持未知，显示 `--`；有次数但没有有效到期时间也显示 `--`。查询失败保留上次次数及对应到期时间并提示错误，正常额度条仍可更新；查询成功但缺少次数时清除旧数据。客户端只查询重置卡，不消费卡。
+OpenAI OAuth 每轮额外读取 `/admin/openai/accounts/{id}/quota`。详情中的“重置次数”取 `rate_limit_reset_credits.available_count`，表示当前可用次数；“最近重置卡到期”取同一响应 `credits[].expires_at` 中最近的未过期时间。确认 0 次或账号平台不支持重置卡时显示“无重置卡”，不显示到期行。OpenAI 查询失败或缺失次数保持未知，显示 `--`；有次数但没有有效到期时间也显示 `--`。查询失败保留上次次数及对应到期时间并提示错误，正常额度条仍可更新；查询成功但缺少次数时清除旧数据。
+
+设置的“账号”页显示每个账号的可用重置次数，打开该页时也读取未选入浮球的 OpenAI OAuth 账号次数，随数据刷新更新；账号列表中的 `extra.codex_reset_credit_snapshot` 只用来恢复次数快照，不保留其他 `extra` 字段。`parent_account_id` 用于识别影子账号，它的重置需在母账号操作。次数大于 0 时显示重置按钮，未登录、演示模式、影子账号、查询错误或操作正在进行时禁用。点击后由 Element Plus Popconfirm 明确展示账号名称和“消耗 1 次重置机会”，确认后才向主进程发出重置命令。
+
+主进程仅接受设置窗口的重置命令，并检查管理员会话、账号类型、影子关系和当前次数。执行前重新查询次数，然后调用 OpenAI 专用重置接口；同时阻止第二次重置和状态修改。该 POST 不自动重试，网络结果不确定时清除旧次数并提示先刷新。服务端响应后清除旧额度与次数、重新读取额度和次数；服务端警告和读取失败分别展示，不将未知次数推断为成功扣减后的数字。普通刷新只读，不消费重置卡。
 
 详情账号状态只在管理员会话已连接、账号状态为 `active` 或 `inactive` 时可切换。调用服务端 `PUT /admin/accounts/{id}`，只提交 `status` 字段；服务端确认目标状态后才更新本地显示，失败时保留原状态。其他状态及演示模式仅显示文字。
 
-额度查询接口可能把上游认证错误返回为 401/403。通过响应 `reason: OPENAI_QUOTA_UPSTREAM_ERROR` 识别为单账号查询失败，不触发管理员会话续期或注销；真正的管理员认证错误仍按原有规则续期或要求重新登录。
+额度查询及重置接口可能把上游认证错误返回为 401/403。通过响应 `reason: OPENAI_QUOTA_UPSTREAM_ERROR` 或 `OPENAI_QUOTA_RESET_UPSTREAM_ERROR` 识别为单账号操作失败，不触发管理员会话续期或注销；真正的管理员认证错误仍按原有规则续期或要求重新登录。
 
 已核对源码：`frontend/src/api/auth.ts`、`frontend/src/api/admin/accounts.ts`、`backend/internal/handler/admin/account_handler.go`、`backend/internal/service/account_usage_service.go`、`backend/internal/handler/admin/openai_oauth_handler.go`、`backend/internal/service/openai_quota_service.go`。
 

@@ -1,6 +1,6 @@
 {
   "name": "sub2api-quota-monitor",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "private": true,
   "description": "Windows floating upstream quota monitor for sub2api",
   "main": "./out/main/index.js",
@@ -22,6 +22,7 @@
     "@element-plus/icons-vue": "^2.3.2",
     "electron-updater": "^6.8.9",
     "element-plus": "^2.14.6",
+    "koffi": "^2.15.2",
     "vue": "^3.5.43",
     "zod": "^4.1.0"
   },

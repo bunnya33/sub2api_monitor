@@ -9,6 +9,7 @@ defineProps<{ state: Snapshot }>();
 const expanded = ref(false);
 const confirm = ref<PopconfirmInstance>();
 const action = (name: 'refresh' | 'visibility' | 'settings' | 'update' | 'quit') => window.desktop.menuAction(name);
+const dismiss = () => window.desktop.dismissMenu();
 function setExpanded(value: boolean): void {
   expanded.value = value;
   window.desktop.resizeUpdateMenu(value);
@@ -24,7 +25,7 @@ onUnmounted(() => stopReset?.());
 </script>
 
 <template>
-  <div class="menu" :class="{ expanded }" role="menu">
+  <div class="menu" :class="{ expanded }" role="menu" @keydown.esc="dismiss">
     <div class="menu-content shell">
       <ElButton text role="menuitem" :icon="Refresh" @click="action('refresh')">刷新额度</ElButton>
       <ElButton text role="menuitemcheckbox" :aria-checked="state.visible" :icon="state.visible ? View : Hide" @click="action('visibility')">{{ state.visible ? '隐藏浮球' : '显示浮球' }}</ElButton>

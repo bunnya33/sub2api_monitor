@@ -8,6 +8,7 @@ import { Controller } from './controller';
 import { Store, type Configuration } from './store';
 import { trayIcon } from './tray-icon';
 import { Updates } from './updates';
+import { watchMenu } from './menu-monitor';
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'quota-font', privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 if (process.env.QUOTA_DATA_DIR) {
@@ -19,11 +20,13 @@ if (!single) app.quit();
 
 let store: Store, config: Configuration, controller: Controller, floating: BrowserWindow;
 let detail: BrowserWindow | null = null, settings: BrowserWindow | null = null, menu: BrowserWindow | null = null;
-let snapPreview: BrowserWindow | null = null, menuBackdrop: BrowserWindow | null = null, tray: Tray;
+let snapPreview: BrowserWindow | null = null, tray: Tray;
 let updates: Updates, baseTrayIcon: Electron.NativeImage, menuExpanded = false;
 const popupReady = new WeakMap<BrowserWindow, Promise<void>>();
 const popupRendered = new Map<Electron.WebContents, () => void>();
 let menuRequest = 0, lastTrayRightClick = 0;
+let menuAnchor: Electron.Rectangle | null = null, stopMenuWatch: (() => void) | null = null;
+let menuWatchAbort: AbortController | null = null;
 const MENU_CONFIRM_SPACE = 104;
 let edge: Edge = null, rotatingIndex = 0, rotatingPeriod: Period = 'five', visible = true, overFloating = false, overDetail = false;
 let snapPreviewEdge: Edge = null;
@@ -32,7 +35,7 @@ let dragOrigin: { native: Electron.Point; bounds: Electron.Rectangle; offsetX: n
 let rotationTimer: NodeJS.Timeout, nextRotation = 0, opacityTimer: NodeJS.Timeout | null = null;
 let currentOpacity = 1;
 
-function url(window: BrowserWindow, view: 'floating' | 'detail' | 'settings' | 'menu' | 'menu-backdrop' | 'snap-preview'): void {
+function url(window: BrowserWindow, view: 'floating' | 'detail' | 'settings' | 'menu' | 'snap-preview'): void {
   const query = { view };
   if (process.env.ELECTRON_RENDERER_URL) void window.loadURL(`${process.env.ELECTRON_RENDERER_URL}?${new URLSearchParams(query)}`);
   else void window.loadFile(path.join(__dirname, '../renderer/index.html'), { query });
@@ -47,12 +50,9 @@ function makeWindow(width: number, height: number, focusable = false): BrowserWi
 }
 function senderView(event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent): string | null {
   const sender = event.sender;
-  if (sender === floating?.webContents) return 'floating';
-  if (sender === detail?.webContents) return 'detail';
-  if (sender === settings?.webContents) return 'settings';
-  if (sender === menu?.webContents) return 'menu';
-  if (sender === menuBackdrop?.webContents) return 'menu-backdrop';
-  if (sender === snapPreview?.webContents) return 'snap-preview';
+  const windows: [BrowserWindow | null | undefined, string][] = [[floating, 'floating'], [detail, 'detail'],
+    [settings, 'settings'], [menu, 'menu'], [snapPreview, 'snap-preview']];
+  for (const [window, view] of windows) if (window && !window.isDestroyed() && sender === window.webContents) return view;
   return null;
 }
 function previewState(): Snapshot {
@@ -204,29 +204,29 @@ function hover(surface: 'floating' | 'detail', inside: boolean): void {
 }
 function closeMenu(): void {
   menuRequest++;
+  menuWatchAbort?.abort(); menuWatchAbort = null;
+  stopMenuWatch?.(); stopMenuWatch = null;
   if (menu && !menu.isDestroyed() && menu.isVisible()) {
     menu.webContents.send('menu:reset');
     menu.hide();
   }
-  if (menuBackdrop && !menuBackdrop.isDestroyed() && menuBackdrop.isVisible()) menuBackdrop.hide();
   menuExpanded = false;
+  menuAnchor = null;
 }
 function menuHeight(expanded = menuExpanded): number {
   return (controller.state.update.status === 'idle' ? 151 : 183) + (expanded ? MENU_CONFIRM_SPACE : 0);
 }
 function syncMenuHeight(): void {
-  if (!menu?.isVisible()) return;
-  const old = menu.getBounds(), height = menuHeight();
-  if (old.height === height) return;
-  const display = displayFor(old);
-  menu.setBounds(clampRect({ ...old, y: old.y + old.height - height, height }, display.bounds));
+  if (!menu?.isVisible() || !menuAnchor) return;
+  const display = displayFor(menuAnchor);
+  menu.setBounds(trayMenuRect(menuAnchor, display.bounds, display.workArea, menuHeight()));
 }
 function resizeMenu(expanded: boolean): void {
   if (!menu?.isVisible() || menuExpanded === expanded) return;
   menuExpanded = expanded;
   syncMenuHeight();
 }
-function preparePopup(window: BrowserWindow, view: 'menu' | 'menu-backdrop'): void {
+function preparePopup(window: BrowserWindow): void {
   const contents = window.webContents;
   window.setAlwaysOnTop(true, 'pop-up-menu');
   window.webContents.setBackgroundThrottling(false);
@@ -235,30 +235,18 @@ function preparePopup(window: BrowserWindow, view: 'menu' | 'menu-backdrop'): vo
     window.once('closed', () => reject(new Error('菜单窗口已关闭')));
     window.webContents.once('did-fail-load', (_event, _code, description) => reject(new Error(description)));
   });
-  const rendered = view === 'menu' ? new Promise<void>(resolve => { popupRendered.set(contents, resolve); }) : Promise.resolve();
+  const rendered = new Promise<void>(resolve => { popupRendered.set(contents, resolve); });
   window.once('closed', () => popupRendered.delete(contents));
   popupReady.set(window, Promise.all([painted, rendered]).then(() => {}));
-  url(window, view);
-}
-function ensureMenuBackdrop(): BrowserWindow {
-  if (!menuBackdrop || menuBackdrop.isDestroyed()) {
-    menuBackdrop = makeWindow(1, 1);
-    preparePopup(menuBackdrop, 'menu-backdrop');
-    menuBackdrop.on('closed', () => { menuBackdrop = null; });
-  }
-  return menuBackdrop;
+  url(window, 'menu');
 }
 function ensureMenu(): BrowserWindow {
   if (!menu || menu.isDestroyed()) {
-    menu = makeWindow(176, menuHeight(), true);
+    menu = makeWindow(176, menuHeight());
     const window = menu;
-    let receivedFocus = false;
-    preparePopup(window, 'menu');
-    window.on('focus', () => { receivedFocus = true; });
-    window.on('hide', () => { receivedFocus = false; });
+    preparePopup(window);
     window.on('blur', () => {
-      if (receivedFocus && !window.webContents.isDevToolsOpened()) closeMenu();
-      receivedFocus = false;
+      if (window.isFocusable() && !window.webContents.isDevToolsOpened()) closeMenu();
     });
     window.on('closed', () => {
       closeMenu();
@@ -267,19 +255,26 @@ function ensureMenu(): BrowserWindow {
   }
   return menu;
 }
-async function openMenu(x: number, y: number): Promise<void> {
+async function openMenu(anchor: Electron.Rectangle): Promise<void> {
   if (menu?.isVisible()) return;
   closeMenu();
   const request = menuRequest;
-  const target = ensureMenu(), backdrop = ensureMenuBackdrop();
+  const target = ensureMenu();
   try {
-    await Promise.all([popupReady.get(target), popupReady.get(backdrop)]);
-    if (request !== menuRequest || target.isDestroyed() || backdrop.isDestroyed()) return;
-    const display = screen.getDisplayNearestPoint({ x, y });
-    target.setBounds(clampRect({ x, y, width: 176, height: menuHeight() }, display.bounds));
-    backdrop.setBounds(display.workArea);
+    await popupReady.get(target);
+    if (request !== menuRequest || target.isDestroyed()) return;
+    menuAnchor = anchor;
+    const display = displayFor(anchor);
+    target.setBounds(trayMenuRect(anchor, display.bounds, display.workArea, menuHeight()));
     publish();
-    backdrop.showInactive(); target.showInactive();
+    let stop: (() => void) | null = null;
+    menuWatchAbort = new AbortController();
+    try { stop = await watchMenu(target, () => { if (request === menuRequest) closeMenu(); }, menuWatchAbort.signal); } catch (error) { console.error('Unable to initialize menu watcher:', error); }
+    if (request !== menuRequest || target.isDestroyed()) { stop?.(); return; }
+    stopMenuWatch = stop;
+    target.setFocusable(!stopMenuWatch);
+    if (stopMenuWatch) { target.showInactive(); target.moveTop(); }
+    else { target.show(); target.focus(); }
   } catch (error) {
     if (request === menuRequest) closeMenu();
     console.error('Unable to show menu:', error);
@@ -290,9 +285,7 @@ function openTrayMenu(icon: Electron.Rectangle, toggle = false): void {
   overFloating = false; hideDetail();
   const cursor = screen.getCursorScreenPoint();
   const anchor = icon.width > 0 && icon.height > 0 ? icon : { ...cursor, width: 1, height: 1 };
-  const display = screen.getDisplayNearestPoint({ x: anchor.x + anchor.width / 2, y: anchor.y + anchor.height / 2 });
-  const rect = trayMenuRect(anchor, display.bounds, display.workArea, menuHeight(false));
-  void openMenu(rect.x, rect.y);
+  void openMenu(anchor);
 }
 function openSettings(): void {
   closeMenu();
@@ -385,7 +378,7 @@ function setupIpc(): void {
   ipcMain.on('menu:action', (event, action: 'settings' | 'refresh' | 'visibility' | 'update' | 'quit') => { if (senderView(event) === 'menu' && menu?.isVisible()) menuAction(action); });
   ipcMain.on('menu:ready', event => { if (senderView(event) === 'menu') { popupRendered.get(event.sender)?.(); popupRendered.delete(event.sender); } });
   ipcMain.on('menu:resize-update', (event, expanded: boolean) => { if (senderView(event) === 'menu') resizeMenu(expanded === true); });
-  ipcMain.on('menu:dismiss', event => { if (senderView(event) === 'menu-backdrop') closeMenu(); });
+  ipcMain.on('menu:dismiss', event => { if (senderView(event) === 'menu') closeMenu(); });
   ipcMain.on('settings:close', event => { if (senderView(event) === 'settings') { controller.setAccountsVisible(false); settings?.hide(); } });
 }
 
@@ -425,9 +418,9 @@ app.whenReady().then(() => {
   }, process.env.QUOTA_DATA_DIR ? process.env.QUOTA_TEST_UPDATE_VERSION : undefined);
   updates.start();
   controller.on('state', () => { resizeFloating(); publish(); });
-  screen.on('display-metrics-changed', () => resizeFloating());
-  screen.on('display-removed', () => resizeFloating());
-  screen.on('display-added', () => resizeFloating());
+  screen.on('display-metrics-changed', () => { closeMenu(); resizeFloating(); });
+  screen.on('display-removed', () => { closeMenu(); resizeFloating(); });
+  screen.on('display-added', () => { closeMenu(); resizeFloating(); });
   rotationTimer = setInterval(() => {
     if (!edge || !controller.state.settings.autoCollapse || dragging || overFloating || overDetail || !floating.isVisible()) return;
     if (Date.now() < nextRotation) return;
@@ -442,6 +435,8 @@ app.whenReady().then(() => {
   void controller.start().then(() => { if (controller.state.connection.status === 'disconnected' && !config.settings.demo) openSettings(); });
 });
 app.on('before-quit', () => {
+  menuRequest++;
+  menuWatchAbort?.abort(); stopMenuWatch?.();
   for (const timer of [dragTimer, opacityTimer, leaveTimer, hoverTimer, rotationTimer]) if (timer) clearInterval(timer);
   updates?.stop();
   controller?.dispose();

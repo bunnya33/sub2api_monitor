@@ -130,7 +130,16 @@ async function prepare(version, directory) {
   fs.mkdirSync(path.dirname(directory), { recursive: true });
   // Both paths are created under the project; completed packages are moved without replacing earlier releases.
   if (fs.existsSync(directory)) throw new Error('发布目录在构建期间被创建，已保留临时产物，请改用其他目录。');
-  fs.renameSync(stage, directory);
+  // Windows can briefly retain an executable handle after the desktop test exits.
+  for (let attempt = 0; ; attempt++) {
+    if (fs.existsSync(directory)) throw new Error('发布目录在归档期间被创建，已保留临时产物。');
+    try { fs.renameSync(stage, directory); break; }
+    catch (error) {
+      if (process.platform !== 'win32' || !['EPERM', 'EBUSY', 'EACCES'].includes(error.code) || attempt >= 20) throw error;
+      if (attempt === 0) console.log('等待 Windows 释放构建目录后归档…');
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+  }
   console.log(`\n发布包已通过检查：${directory}\n下一步：提交并推送代码，然后运行 npm run release:draft -- --version ${version}${directory === releaseDirectory(root, version) ? '' : ` --output ${path.relative(root, directory)}`}`);
 }
 function npmWithEnvironment(env, ...args) {

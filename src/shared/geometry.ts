@@ -23,13 +23,17 @@ export function clampRect(rect: Rect, work: Rect, edge: Edge = null): Rect {
   return { x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height) };
 }
 export function trayMenuRect(icon: Rect, display: Rect, work: Rect, height: number, width = 176): Rect {
+  const gap = 8;
   const taskbarAtTop = work.y > display.y;
   const taskbarAtLeft = work.x > display.x;
+  const taskbarAtRight = work.x + work.width < display.x + display.width;
+  const inset = { x: work.x + gap, y: work.y + gap, width: Math.max(1, work.width - gap * 2), height: Math.max(1, work.height - gap * 2) };
   return clampRect({
-    x: taskbarAtLeft ? icon.x : icon.x + icon.width - width,
-    y: taskbarAtTop ? icon.y : icon.y + icon.height - height,
+    x: taskbarAtLeft ? Math.max(icon.x + icon.width + gap, inset.x)
+      : taskbarAtRight ? Math.min(icon.x - gap, inset.x + inset.width) - width : icon.x + icon.width - width,
+    y: taskbarAtTop ? Math.max(icon.y + icon.height + gap, inset.y) : Math.min(icon.y - gap, inset.y + inset.height) - height,
     width, height
-  }, display);
+  }, inset);
 }
 export function snapEdge(rect: Rect, work: Rect, distance = 20): Edge {
   const candidates: [Exclude<Edge, null>, number][] = [

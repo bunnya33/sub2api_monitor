@@ -113,22 +113,36 @@ describe('multi-display work area geometry', () => {
     expect(rect.x + rect.width).toBeLessThanOrEqual(work.x + work.width);
     expect(rect.y + rect.height).toBeLessThanOrEqual(work.y + work.height);
   });
-  it('anchors tray menus on the taskbar while keeping them inside their display', () => {
+  it('leaves an 8 DIP gap to taskbars on each edge, including negative screen coordinates', () => {
     const display = { x: -1920, y: -200, width: 1920, height: 1080 };
     const bottomWork = { ...display, height: 1032 };
     const bottomIcon = { x: -90, y: 839, width: 24, height: 24 };
     const bottom = trayMenuRect(bottomIcon, display, bottomWork, 151);
-    expect(bottom.y + bottom.height).toBe(bottomIcon.y + bottomIcon.height);
-    expect(bottom.y + bottom.height).toBeGreaterThan(bottomWork.y + bottomWork.height);
+    expect(bottom.y + bottom.height).toBe(bottomWork.y + bottomWork.height - 8);
     expect(bottom.x + bottom.width).toBe(bottomIcon.x + bottomIcon.width);
     const top = trayMenuRect({ x: -25, y: -195, width: 24, height: 24 }, display,
       { ...display, y: -152, height: 1032 }, 183);
-    expect(top.y).toBe(-195);
-    expect(top.x + top.width).toBeLessThanOrEqual(display.x + display.width);
+    expect(top.y).toBe(-144);
+    expect(top.x + top.width).toBeLessThanOrEqual(display.x + display.width - 8);
     const left = trayMenuRect({ x: -1915, y: 700, width: 24, height: 24 }, display,
       { ...display, x: -1872, width: 1872 }, 287);
-    expect(left.x).toBe(-1915);
-    expect(left.y + left.height).toBeLessThanOrEqual(display.y + display.height);
+    expect(left.x).toBe(-1864);
+    expect(left.y + left.height).toBeLessThanOrEqual(display.y + display.height - 8);
+    const rightWork = { ...display, width: 1872 };
+    const right = trayMenuRect({ x: -35, y: 700, width: 24, height: 24 }, display, rightWork, 287);
+    expect(right.x + right.width).toBe(rightWork.x + rightWork.width - 8);
+  });
+  it('keeps overflow menus and expanded confirmation panels away from screen edges', () => {
+    const display = { x: 0, y: 0, width: 1920, height: 1080 };
+    const work = { ...display, height: 1032 };
+    const icon = { x: 1810, y: 970, width: 24, height: 24 };
+    const menu = trayMenuRect(icon, display, work, 151);
+    const expanded = trayMenuRect(icon, display, work, 287);
+    expect(menu.y + menu.height).toBe(icon.y - 8);
+    expect(expanded.y + expanded.height).toBe(menu.y + menu.height);
+    const autoHidden = trayMenuRect({ x: 1918, y: 1078, width: 24, height: 24 }, display, display, 287);
+    expect(autoHidden.x + autoHidden.width).toBe(1912);
+    expect(autoHidden.y + autoHidden.height).toBeLessThanOrEqual(1072);
   });
   it('keeps detail off the floating window at the bottom-right corner', () => {
     const work = { x: 0, y: 0, width: 1920, height: 1040 };

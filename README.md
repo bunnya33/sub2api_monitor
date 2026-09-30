@@ -4,7 +4,7 @@ Windows 桌面浮球，查看 sub2api 0.2.8 接入的 Claude、OpenAI 等上游�
 
 ## 使用
 
-运行 [Sub2API Quota Monitor.exe](release/v0.4.2/win-unpacked/Sub2API%20Quota%20Monitor.exe)，系统托盘右键打开自绘菜单，设置、刷新和更新等操作统一从此进入；浮球右键不弹出菜单。托盘菜单使用任务栏上方的窗口层级，等待内容就绪后单次显示。首次启动显示明确标记的演示账号；在「连接」页填写服务器地址、管理员邮箱和密码，若服务器要求双重验证，再输入 6 位验证码。到「账号」页选择账号并填写浮球别名。
+运行 [Sub2API Quota Monitor.exe](release/v0.4.3/win-unpacked/Sub2API%20Quota%20Monitor.exe)，系统托盘右键打开自绘菜单，设置、刷新和更新等操作统一从此进入；浮球右键不弹出菜单。托盘菜单在任务栏上方留出 8 DIP 间距，等待内容就绪后单次显示；按钮可直接点击，点击菜单外、任务栏或切换应用后自动收起。首次启动显示明确标记的演示账号；在「连接」页填写服务器地址、管理员邮箱和密码，若服务器要求双重验证，再输入 6 位验证码。到「账号」页选择账号并填写浮球别名。
 
 “账号”页也显示可用重置次数，有次数时显示“重置额度”。点击后确认账号及消耗一次重置机会，才会执行。没有重置卡时隐藏按钮；影子账号需在母账号操作。
 
@@ -36,15 +36,15 @@ npm run pack
 
 `npm run pack` 输出 `release/win-unpacked/Sub2API Quota Monitor.exe`，运行时须保留同目录其余文件。`npm run dist:win` 构建安装程序。`npm run test:desktop` 使用隔离的临时配置和本地模拟 sub2api 服务，截图及报告写入 `artifacts/electron-smoke/`；不会连接用户服务器。
 
-后续版本使用固定流程，完整说明见 [Windows 打包与更新发布](docs/releasing.md)：
+后续版本使用固定流程，以下以准备下一版 `0.4.4` 为例，完整说明见 [Windows 打包与更新发布](docs/releasing.md)：
 
 ```powershell
-npm run release:prepare -- --version 0.4.2
+npm run release:prepare -- --version 0.4.4
 # 提交本次代码和版本文件，并推送到 main 后：
-npm run release:draft -- --version 0.4.2
+npm run release:draft -- --version 0.4.4
 ```
 
-第一条命令调整版本、测试、打包、校验并归档到 `release/v0.4.2/`；第二条命令上传 GitHub Release 草稿，最后在 GitHub 点击 **Publish release**。客户端启动约一分钟后、此后每 12 小时检查正式版本，提示后由用户确认下载与安装。`npm run release:verify -- --version 0.4.2` 可再次核对产物。安装包目前未做数字签名。
+第一条命令调整版本、测试、打包、校验并归档到 `release/v0.4.4/`；第二条命令上传 GitHub Release 草稿，最后在 GitHub 点击 **Publish release**。客户端启动约一分钟后、此后每 12 小时检查正式版本，提示后由用户确认下载与安装。`npm run release:verify -- --version 0.4.3` 可再次核对当前产物。安装包目前未做数字签名。
 
 ## 结构
 

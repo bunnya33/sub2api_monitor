@@ -9,6 +9,11 @@ async function trayRightClick(electronApp, x, y, count = 1) {
   await electronApp.evaluate(({ app }, { x, y, count }) => {
     for (let i = 0; i < count; i++) app.emit('quota:test-tray-right-click', { x, y, width: 24, height: 24 });
   }, { x, y, count });
+  for (let i = 0; i < 100; i++) {
+    if (await electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some(window => /[?&]view=menu(?:&|$)/.test(window.webContents.getURL()) && window.isVisible()))) return;
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  throw new Error('Tray menu did not become visible');
 }
 
 (async () => {
@@ -235,8 +240,10 @@ async function trayRightClick(electronApp, x, y, count = 1) {
     await settings.getByRole('tab', { name: '显示' }).click();
     const opacitySlider = settings.getByRole('slider', { name: '失焦不透明度' });
     await opacitySlider.scrollIntoViewIfNeeded();
-    const sliderBox = await opacitySlider.boundingBox();
-    await settings.mouse.move(sliderBox.x + sliderBox.width * .2, sliderBox.y + sliderBox.height / 2);
+    const sliderBox = await opacitySlider.locator('..').boundingBox();
+    const sliderThumb = await opacitySlider.locator('.el-slider__button').boundingBox();
+    // Drag the thumb: pressing the track only requests a value change in Element Plus.
+    await settings.mouse.move(sliderThumb.x + sliderThumb.width / 2, sliderThumb.y + sliderThumb.height / 2);
     await settings.mouse.down();
     await settings.mouse.move(sliderBox.x + sliderBox.width * .85, sliderBox.y + sliderBox.height / 2, { steps: 6 });
     const draggedOpacity = Number(await opacitySlider.getAttribute('aria-valuenow'));
@@ -542,35 +549,40 @@ async function trayRightClick(electronApp, x, y, count = 1) {
       return { id: panel.id, x: work.x + 40, y: work.y + 40 };
     });
     const trayMenuWindow = activeApp.waitForEvent('window', { predicate: window => /[?&]view=menu(?:&|$)/.test(window.url()), timeout: 5000 });
-    const backdropWindow = activeApp.waitForEvent('window', { predicate: window => window.url().includes('view=menu-backdrop'), timeout: 5000 });
     await trayRightClick(activeApp, fakeOverflow.x, fakeOverflow.y);
-    const [trayMenu, backdrop] = await Promise.all([trayMenuWindow, backdropWindow]);
+    const trayMenu = await trayMenuWindow;
     await trayMenu.waitForSelector('.menu');
-    await backdrop.waitForSelector('.menu-backdrop');
     await trayMenu.waitForTimeout(200);
     const lifecycle = await activeApp.evaluate(() => globalThis.menuLifecycle.filter(event => /[?&]view=menu(?:&|$)/.test(event.url)));
     assert.deepEqual(lifecycle.map(event => event.event), ['ready-to-show', 'show']);
     checks.push('tray popup is painted before its single show and stays visible');
-    const backdropBounds = await activeApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes('view=menu-backdrop')).getBounds());
-    const trayWorkArea = await activeApp.evaluate(({ screen }, point) => screen.getDisplayNearestPoint(point).workArea, fakeOverflow);
-    assert.deepEqual(backdropBounds, trayWorkArea);
     const beforeOutsideClick = await activeApp.evaluate(({ BrowserWindow }, id) => ({
       focused: BrowserWindow.getFocusedWindow()?.id, panel: BrowserWindow.fromId(id)?.isVisible(),
       menu: BrowserWindow.getAllWindows().find(window => /[?&]view=menu(?:&|$)/.test(window.webContents.getURL()))?.isVisible(),
-      backdrop: BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes('view=menu-backdrop'))?.isVisible()
+      backdrop: BrowserWindow.getAllWindows().some(window => window.webContents.getURL().includes('view=menu-backdrop')),
+      focusable: BrowserWindow.getAllWindows().find(window => /[?&]view=menu(?:&|$)/.test(window.webContents.getURL())).isFocusable()
     }), fakeOverflow.id);
-    assert.deepEqual(beforeOutsideClick, { focused: fakeOverflow.id, panel: true, menu: true, backdrop: true });
-    await activeApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(window => /[?&]view=menu(?:&|$)/.test(window.webContents.getURL())).emit('blur'));
-    assert.equal(await activeApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(window => /[?&]view=menu(?:&|$)/.test(window.webContents.getURL())).isVisible()), true);
-    checks.push('inactive tray popup ignores blur until it has received focus');
-    await backdrop.locator('.menu-backdrop').click({ position: { x: 500, y: 500 } });
-    await restoredFloat.waitForTimeout(100);
+    assert.deepEqual(beforeOutsideClick, { focused: fakeOverflow.id, panel: true, menu: true, backdrop: false, focusable: false });
+    // This changes the actual Windows foreground HWND and exercises SetWinEventHook.
+    await activeApp.evaluate(async ({ BrowserWindow }) => {
+      const external = new BrowserWindow({ width: 240, height: 160, show: false });
+      await external.loadURL('data:text/html,<body>Another application window</body>');
+      external.show(); external.focus();
+      globalThis.externalTestWindow = external;
+    });
+    await trayMenu.waitForFunction(async () => !(await window.desktop.getState()).busy);
+    for (let i = 0; i < 30; i++) {
+      if (!await activeApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(window => /[?&]view=menu(?:&|$)/.test(window.webContents.getURL())).isVisible())) break;
+      await trayMenu.waitForTimeout(50);
+    }
     const afterOutsideClick = await activeApp.evaluate(({ BrowserWindow }, id) => ({
-      focused: BrowserWindow.getFocusedWindow()?.id, panel: BrowserWindow.fromId(id)?.isVisible(),
+      panel: BrowserWindow.fromId(id)?.isVisible(),
       menu: BrowserWindow.getAllWindows().find(window => /[?&]view=menu(?:&|$)/.test(window.webContents.getURL()))?.isVisible(),
-      backdrop: BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes('view=menu-backdrop'))?.isVisible()
+      backdrop: BrowserWindow.getAllWindows().some(window => window.webContents.getURL().includes('view=menu-backdrop'))
     }), fakeOverflow.id);
-    assert.deepEqual(afterOutsideClick, { focused: fakeOverflow.id, panel: true, menu: false, backdrop: false });
+    assert.deepEqual(afterOutsideClick, { panel: true, menu: false, backdrop: false });
+    await activeApp.evaluate(() => globalThis.externalTestWindow.close());
+    await trayMenu.waitForTimeout(100);
     await trayRightClick(activeApp, fakeOverflow.x, fakeOverflow.y, 2);
     await trayMenu.waitForTimeout(200);
     assert.equal(await activeApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(window => /[?&]view=menu(?:&|$)/.test(window.webContents.getURL())).isVisible()), true);
@@ -578,7 +590,7 @@ async function trayRightClick(electronApp, x, y, count = 1) {
     assert.deepEqual(reopenLifecycle.map(event => event.event), ['ready-to-show', 'show', 'hide', 'show']);
     checks.push('duplicate tray open requests do not toggle or flash the popup');
     await activeApp.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)?.close(), fakeOverflow.id);
-    checks.push('tray menu keeps the system panel focused and outside click closes only our menu first');
+    checks.push('native foreground changes dismiss the nonactivating menu without a desktop input overlay');
     await activeApp.close(); activeApp = null;
     const legacyData = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-legacy-layout-'));
     const legacySettings = { ...state.settings, topWidth: 178, sideWidth: 72 };
@@ -601,10 +613,8 @@ async function trayRightClick(electronApp, x, y, count = 1) {
     const updateFloat = await activeApp.firstWindow();
     await updateFloat.waitForFunction(async () => (await window.desktop.getState()).update.status === 'available');
     const updateMenuWindow = activeApp.waitForEvent('window', { predicate: window => /[?&]view=menu(?:&|$)/.test(window.url()), timeout: 5000 });
-    const updateBackdropWindow = activeApp.waitForEvent('window', { predicate: window => window.url().includes('view=menu-backdrop'), timeout: 5000 });
     await trayRightClick(activeApp, 500, 300);
     const updateMenu = await updateMenuWindow;
-    await updateBackdropWindow;
     await updateMenu.getByRole('menuitem', { name: '更新到 v9.9.9' }).waitFor();
     const menuGeometry = await updateMenu.locator('.menu-content').evaluate(element => ({
       height: element.getBoundingClientRect().height,
@@ -622,8 +632,11 @@ async function trayRightClick(electronApp, x, y, count = 1) {
     assert.equal((await activeApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(w => /[?&]view=menu(?:&|$)/.test(w.webContents.getURL())).getBounds())).height, 287);
     await updateMenu.screenshot({ path: path.join(output, 'menu-update-confirm.png') });
     await updateMenu.getByRole('button', { name: '取消' }).click();
+    await updateMenu.locator('.el-popconfirm').waitFor({ state: 'hidden' });
+    await updateMenu.waitForFunction(() => !document.querySelector('.menu')?.classList.contains('expanded') && document.documentElement.clientHeight === 183);
     assert.equal((await updateFloat.evaluate(() => window.desktop.getState())).update.status, 'available');
     await updateMenu.getByRole('menuitem', { name: '更新到 v9.9.9' }).click();
+    await updateMenu.waitForFunction(() => document.querySelector('.menu')?.classList.contains('expanded') && document.documentElement.clientHeight === 287);
     await updateMenu.getByRole('button', { name: '确认' }).click();
     await updateFloat.waitForFunction(async () => (await window.desktop.getState()).update.status === 'downloading');
     await updateFloat.mouse.click(18, 16, { button: 'right' });

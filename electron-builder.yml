@@ -11,6 +11,9 @@ files:
   - out/**/*
   - assets/**/*
   - package.json
+  - '!node_modules/koffi/build/koffi/!(win32_x64)/**/*'
+asarUnpack:
+  - node_modules/koffi/build/koffi/win32_x64/*.node
 win:
   target:
     - target: nsis

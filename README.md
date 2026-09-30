@@ -34,7 +34,15 @@ npm run pack
 
 `npm run pack` 输出 `release/win-unpacked/Sub2API Quota Monitor.exe`，运行时须保留同目录其余文件。`npm run dist:win` 构建安装程序。`npm run test:desktop` 使用隔离的临时配置和本地模拟 sub2api 服务，截图及报告写入 `artifacts/electron-smoke/`；不会连接用户服务器。
 
-发布 GitHub Release 时，标签使用 `v` 前缀的版本号（例如 `v0.4.1`），并上传同一次构建的 `Sub2API-Quota-Monitor-Setup-0.4.1.exe`、`.exe.blockmap` 和 `latest.yml`。保持 Release 附件名与 `latest.yml` 一致；草稿和预发布版本不会推送给正式版客户端。安装包目前未做数字签名，长期分发前应配置 Windows 代码签名。
+后续版本使用固定流程，完整说明见 [Windows 打包与更新发布](docs/releasing.md)：
+
+```powershell
+npm run release:prepare -- --version 0.4.2
+# 提交本次代码和版本文件，并推送到 main 后：
+npm run release:draft -- --version 0.4.2
+```
+
+第一条命令调整版本、测试、打包、校验并归档到 `release/v0.4.2/`；第二条命令上传 GitHub Release 草稿，最后在 GitHub 点击 **Publish release**。客户端启动约一分钟后、此后每 12 小时检查正式版本，提示后由用户确认下载与安装。`npm run release:verify -- --version 0.4.2` 可再次核对产物。安装包目前未做数字签名。
 
 ## 结构
 
@@ -46,6 +54,7 @@ npm run pack
 | `src/preload` | 受限的渲染进程接口 |
 | `tests/electron-*.test.ts` | 显示规则与 sub2api 0.2.8 测试 |
 | `scripts/desktop-smoke.cjs` | 实际 Electron 窗口与登录流程验证 |
+| `scripts/release.cjs` | 版本调整、测试、Windows 打包校验与 Release 草稿上传 |
 
 原 C# / .NET 10 + WPF 代码仍在 `src/QuotaMonitor.Core`、`src/QuotaMonitor.Desktop` 和 `tests/QuotaMonitor.Tests`，并固定在 Git 标签 `wpf-baseline`。当前主线的构建脚本使用 Electron，WPF 代码可单独用 `dotnet build QuotaMonitor.sln -c Release` 编译。
 

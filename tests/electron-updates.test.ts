@@ -77,6 +77,36 @@ describe.runIf(process.platform === 'win32')('update check scheduling', () => {
     await vi.advanceTimersByTimeAsync(600_000);
     expect(mocks.updater.checkForUpdates).not.toHaveBeenCalled();
   });
+  it('reports manual checks in progress and shares the request with automatic checks', async () => {
+    let complete!: () => void;
+    mocks.updater.checkForUpdates.mockReturnValueOnce(new Promise<void>(resolve => { complete = resolve; }));
+    updates.start();
+    expect(updates.state.checking).toBe(true);
+    const manual = updates.check();
+    expect(mocks.updater.checkForUpdates).toHaveBeenCalledTimes(1);
+    complete();
+    expect(await manual).toEqual({ ok: true, value: undefined });
+    expect(updates.state.checking).toBe(false);
+    expect(updates.state.status).toBe('idle');
+  });
+  it('publishes a discovered version without downloading it', async () => {
+    updates.start(); await vi.advanceTimersByTimeAsync(0);
+    const available = mocks.updater.on.mock.calls.find(([event]) => event === 'update-available')![1];
+    mocks.updater.checkForUpdates.mockImplementationOnce(async () => { available({ version: '9.9.9' }); });
+    expect(await updates.check()).toEqual({ ok: true, value: undefined });
+    expect(updates.state).toMatchObject({ status: 'available', version: '9.9.9', checking: false });
+    expect(mocks.updater.downloadUpdate).not.toHaveBeenCalled();
+  });
+  it('returns a failed check to the menu and allows a later retry', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      updates.start(); await vi.advanceTimersByTimeAsync(0);
+      mocks.updater.checkForUpdates.mockRejectedValueOnce(new Error('network unavailable'));
+      expect(await updates.check()).toEqual({ ok: false, error: 'network unavailable' });
+      expect(updates.state.checking).toBe(false);
+      expect(await updates.check()).toEqual({ ok: true, value: undefined });
+    } finally { logged.mockRestore(); }
+  });
 });
 
 it('defaults to ten minutes and accepts a positive whole-minute interval', () => {

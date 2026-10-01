@@ -1,5 +1,6 @@
 import { ref, watch } from 'vue';
 import { defaults, migrateLegacyPalette, type DesktopAPI, type Quota, type Settings, type Snapshot } from '../../shared/model';
+import { version } from '../../../package.json';
 
 export const view = new URLSearchParams(location.search).get('view') || 'floating';
 export const preview = !window.desktop;
@@ -39,15 +40,21 @@ function browserPreview(): DesktopAPI {
       snapshot = { ...snapshot, settings, quotas: quotas.filter(item => settings.selectedIds.includes(item.id)) }; publish(); return { ok: true, value: undefined }; },
     login: async () => ({ ok: false, error: '请在桌面客户端登录服务器' }), verify: async () => ({ ok: false, error: '请在桌面客户端验证' }),
     logout: async () => ({ ok: true, value: undefined }), refresh: async () => { snapshot = { ...snapshot, lastRefresh: Date.now() }; publish(); return { ok: true, value: undefined }; },
+    checkUpdates: async () => ({ ok: false, error: '开发版不检查线上更新' }),
+    getAppInfo: async () => ({ name: 'Sub2API Quota Monitor', version, homepage: 'https://github.com/bunnya33/sub2api_monitor', development: true }),
+    closeAbout: () => { location.search = '?view=menu'; },
+    openHomepage: () => { window.open('https://github.com/bunnya33/sub2api_monitor', '_blank', 'noopener,noreferrer'); },
     setAccountStatus: async () => ({ ok: false, error: '演示数据不可修改' }),
     setAccountsVisible: () => {}, resetAccountQuota: async () => ({ ok: false, error: '演示数据不可重置' }),
     importFont: async () => ({ ok: false, error: '请在桌面客户端导入字体' }), removeFont: async () => ({ ok: true, value: undefined }),
     drag: () => {}, dragMove: () => {}, hover: () => {},
     menuAction: action => { if (action === 'settings') location.search = '?view=settings';
+      if (action === 'about') location.search = '?view=about';
       if (action === 'refresh') { snapshot = { ...snapshot, lastRefresh: Date.now() }; publish(); } },
     resizeUpdateMenu: () => {},
     menuReady: () => {},
     settingsReady: () => {},
+    aboutReady: () => {},
     subscribeMenuReset: () => () => {},
     dismissMenu: () => { location.search = '?view=floating'; },
     closeSettings: () => { location.search = '?view=floating'; }

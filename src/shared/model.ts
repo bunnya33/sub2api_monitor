@@ -38,7 +38,8 @@ export interface Quota extends Account {
   resetCredits: ResetCredits | null; resetCreditsError: string | null;
 }
 export interface Connection { status: 'demo' | 'disconnected' | 'authenticating' | 'twoFactor' | 'connected' | 'expired' | 'error'; server: string; email: string; message: string }
-export interface UpdateState { status: 'idle' | 'available' | 'downloading' | 'downloaded'; version: string | null; progress: number; error: string | null }
+export interface UpdateState { status: 'idle' | 'available' | 'downloading' | 'downloaded'; version: string | null; progress: number; error: string | null; checking?: boolean }
+export interface AppInfo { name: string; version: string; homepage: string; development: boolean }
 export interface Snapshot {
   settings: Settings; connection: Connection; available: Account[]; quotas: Quota[];
   busy: boolean; lastRefresh: number | null; nextRefresh: number | null; error: string | null;
@@ -55,6 +56,10 @@ export interface DesktopAPI {
   verify(code: string): Promise<Result>;
   logout(): Promise<Result>;
   refresh(): Promise<Result>;
+  checkUpdates(): Promise<Result>;
+  getAppInfo(): Promise<AppInfo>;
+  closeAbout(): void;
+  openHomepage(): void;
   setAccountStatus(id: number, status: 'active' | 'inactive'): Promise<Result>;
   setAccountsVisible(visible: boolean): void;
   resetAccountQuota(id: number): Promise<Result<string>>;
@@ -63,10 +68,11 @@ export interface DesktopAPI {
   drag(start: boolean, x?: number, y?: number): void;
   dragMove(x: number, y: number): void;
   hover(surface: 'floating' | 'detail', inside: boolean): void;
-  menuAction(action: 'settings' | 'refresh' | 'visibility' | 'update' | 'quit'): void;
+  menuAction(action: 'settings' | 'refresh' | 'visibility' | 'update' | 'about' | 'quit'): void;
   resizeUpdateMenu(expanded: boolean): void;
   menuReady(): void;
   settingsReady(): void;
+  aboutReady(): void;
   subscribeMenuReset(listener: () => void): () => void;
   dismissMenu(): void;
   closeSettings(): void;

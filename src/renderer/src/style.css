@@ -29,6 +29,7 @@ body { background: transparent; color: var(--text); user-select: none; letter-sp
 .browser-preview .settings { width: min(520px, calc(100vw - 24px)); height: min(568px, calc(100vh - 24px)); }
 .browser-preview .detail { width: min(320px, calc(100vw - 24px)); height: min(var(--detail-height), calc(100vh - 24px)); }
 .browser-preview .menu { width: 176px; height: auto; }
+.browser-preview .about { width: min(350px, calc(100vw - 24px)); height: 236px; }
 button, input, select { font: inherit; letter-spacing: 0; }
 button { cursor: pointer; color: inherit; }
 button:disabled { cursor: default; opacity: .5; }
@@ -114,6 +115,13 @@ input, select { color: var(--text); }
 .menu svg { flex: 0 0 auto; }
 .menu-line { height: 1px; background: var(--line); margin: 5px 4px; }
 .settings { display: flex; flex-direction: column; border-radius: 6px; }
+.about { display: flex; flex-direction: column; }
+.about-body { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; }
+.about-icon { width: 28px; height: 28px; color: #34554d; }
+.about-body strong { font-size: 15px; font-weight: 600; }
+.about-version, .about-body p { color: var(--muted); font-size: 12px; }
+.about-body p { margin: 4px 0; }
+.about-body .el-button { color: #187552; font-size: 12px; }
 .settings-head { height: 38px; min-height: 38px; padding-left: 14px; font-weight: 600; -webkit-app-region: drag; }
 .settings-head button { -webkit-app-region: no-drag; }
 .tabs { height: 37px; min-height: 37px; padding: 3px 10px; display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; border-bottom: 1px solid var(--line); }

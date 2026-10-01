@@ -1,11 +1,11 @@
 import { app } from 'electron';
 import { autoUpdater } from 'electron-updater';
-import { defaults, type UpdateState } from '../shared/model';
+import { defaults, type Result, type UpdateState } from '../shared/model';
 
 export class Updates {
   state: UpdateState = { status: 'idle', version: null, progress: 0, error: null };
   private interval: NodeJS.Timeout | null = null;
-  private checking = false;
+  private checkTask: Promise<Result> | null = null;
   private started = false;
   private stopped = false;
 
@@ -52,12 +52,21 @@ export class Updates {
     this.interval = setInterval(() => void this.check(), this.checkMinutes * 60_000);
   }
 
-  async check(): Promise<void> {
-    if (this.stopped || this.checking || this.state.status === 'downloading' || this.state.status === 'downloaded' || !app.isPackaged) return;
-    this.checking = true;
-    try { await autoUpdater.checkForUpdates(); }
-    catch (error) { console.error('Update check failed:', error); }
-    finally { this.checking = false; }
+  async check(): Promise<Result> {
+    if (this.stopped) return { ok: false, error: '程序正在退出' };
+    if (this.checkTask) return this.checkTask;
+    if (this.state.status === 'downloading' || this.state.status === 'downloaded') return { ok: true, value: undefined };
+    if (!app.isPackaged || process.platform !== 'win32') return { ok: false, error: '开发版不检查线上更新' };
+    this.set({ ...this.state, checking: true });
+    this.checkTask = (async (): Promise<Result> => {
+      try { await autoUpdater.checkForUpdates(); return { ok: true, value: undefined }; }
+      catch (error) {
+        console.error('Update check failed:', error);
+        return { ok: false, error: error instanceof Error ? error.message : '检查更新失败' };
+      }
+    })();
+    try { return await this.checkTask; }
+    finally { this.checkTask = null; this.set({ ...this.state, checking: false }); }
   }
 
   async confirm(): Promise<void> {

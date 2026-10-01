@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, net, protocol, screen, Tray } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, net, protocol, screen, shell, Tray } from 'electron';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -20,11 +20,14 @@ if (!single) app.quit();
 
 let store: Store, config: Configuration, controller: Controller, floating: BrowserWindow;
 let detail: BrowserWindow | null = null, settings: BrowserWindow | null = null, menu: BrowserWindow | null = null;
+let about: BrowserWindow | null = null;
 let snapPreview: BrowserWindow | null = null, tray: Tray;
 let updates: Updates, baseTrayIcon: Electron.NativeImage, menuExpanded = false;
 const viewReady = new WeakMap<BrowserWindow, Promise<void>>();
 const viewRendered = new Map<Electron.WebContents, () => void>();
 let settingsRequest = 0, settingsOpening = false;
+let aboutRequest = 0, aboutOpening = false;
+const HOMEPAGE = 'https://github.com/bunnya33/sub2api_monitor';
 let menuRequest = 0, lastTrayRightClick = 0;
 let menuAnchor: Electron.Rectangle | null = null, stopMenuWatch: (() => void) | null = null;
 let menuWatchAbort: AbortController | null = null;
@@ -37,7 +40,7 @@ let dragPosition: Electron.Point | null = null;
 let rotationTimer: NodeJS.Timeout, nextRotation = 0, opacityTimer: NodeJS.Timeout | null = null;
 let currentOpacity = 1;
 
-function url(window: BrowserWindow, view: 'floating' | 'detail' | 'settings' | 'menu' | 'snap-preview'): void {
+function url(window: BrowserWindow, view: 'floating' | 'detail' | 'settings' | 'menu' | 'about' | 'snap-preview'): void {
   const query = { view };
   if (process.env.ELECTRON_RENDERER_URL) void window.loadURL(`${process.env.ELECTRON_RENDERER_URL}?${new URLSearchParams(query)}`);
   else void window.loadFile(path.join(__dirname, '../renderer/index.html'), { query });
@@ -53,7 +56,7 @@ function makeWindow(width: number, height: number, focusable = false): BrowserWi
 function senderView(event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent): string | null {
   const sender = event.sender;
   const windows: [BrowserWindow | null | undefined, string][] = [[floating, 'floating'], [detail, 'detail'],
-    [settings, 'settings'], [menu, 'menu'], [snapPreview, 'snap-preview']];
+    [settings, 'settings'], [menu, 'menu'], [about, 'about'], [snapPreview, 'snap-preview']];
   for (const [window, view] of windows) if (window && !window.isDestroyed() && sender === window.webContents) return view;
   return null;
 }
@@ -67,7 +70,7 @@ function publish(): void {
   controller.state.rotatingIndex = rotatingIndex;
   controller.state.rotatingPeriod = rotatingPeriod;
   controller.state.visible = visible;
-  for (const window of [floating, detail, settings, menu]) if (window && !window.isDestroyed()) window.webContents.send('state', controller.state);
+  for (const window of [floating, detail, settings, menu, about]) if (window && !window.isDestroyed()) window.webContents.send('state', controller.state);
   if (snapPreview && !snapPreview.isDestroyed()) snapPreview.webContents.send('state', previewState());
   applyOpacity();
 }
@@ -225,7 +228,7 @@ function closeMenu(): void {
   menuAnchor = null;
 }
 function menuHeight(expanded = menuExpanded): number {
-  return (controller.state.update.status === 'idle' ? 151 : 183) + (expanded ? MENU_CONFIRM_SPACE : 0);
+  return 226 + (expanded ? MENU_CONFIRM_SPACE : 0);
 }
 function syncMenuHeight(): void {
   if (!menu?.isVisible() || !menuAnchor) return;
@@ -237,7 +240,7 @@ function resizeMenu(expanded: boolean): void {
   menuExpanded = expanded;
   syncMenuHeight();
 }
-function prepareView(window: BrowserWindow, view: 'menu' | 'settings'): void {
+function prepareView(window: BrowserWindow, view: 'menu' | 'settings' | 'about'): void {
   const contents = window.webContents;
   if (view === 'menu') {
     window.setAlwaysOnTop(true, 'pop-up-menu');
@@ -330,16 +333,46 @@ async function openSettings(): Promise<void> {
     if (request === settingsRequest) settingsOpening = false;
   }
 }
-function menuAction(action: 'settings' | 'refresh' | 'visibility' | 'update' | 'quit'): void {
+async function openAbout(): Promise<void> {
+  if (aboutOpening) return;
+  aboutOpening = true;
+  const request = ++aboutRequest;
+  if (!about || about.isDestroyed()) {
+    about = makeWindow(350, 236, true);
+    const window = about;
+    window.setAlwaysOnTop(false); window.setSkipTaskbar(false); window.center();
+    prepareView(window, 'about');
+    window.on('closed', () => {
+      if (about !== window) return;
+      about = null; aboutRequest++; aboutOpening = false;
+    });
+  }
+  const target = about;
+  try {
+    await viewReady.get(target);
+    if (request !== aboutRequest || target.isDestroyed()) return;
+    if (!target.isVisible()) target.show();
+    target.focus();
+  } catch (error) {
+    if (request === aboutRequest && !target.isDestroyed()) target.destroy();
+    console.error('Unable to show about:', error);
+  } finally { if (request === aboutRequest) aboutOpening = false; }
+}
+function menuAction(action: 'settings' | 'refresh' | 'visibility' | 'update' | 'about' | 'quit'): void {
   closeMenu();
   if (action === 'settings') openSettings();
   if (action === 'refresh') void controller.refresh();
   if (action === 'visibility') { visible = !visible; if (visible) floating.showInactive(); else { hideDetail(); floating.hide(); } publish(); }
   if (action === 'update') void updates.confirm();
+  if (action === 'about') void openAbout();
   if (action === 'quit') app.quit();
 }
 function setupIpc(): void {
   ipcMain.handle('state:get', event => senderView(event) === 'snap-preview' ? previewState() : senderView(event) ? controller.state : null);
+  ipcMain.handle('updates:check', event => senderView(event) === 'menu' ? updates.check() : { ok: false, error: '无效窗口' });
+  ipcMain.handle('app:info', event => senderView(event) ? { name: 'Sub2API Quota Monitor', version: app.getVersion(), homepage: HOMEPAGE, development: !app.isPackaged } : null);
+  ipcMain.on('app:homepage', event => { if (senderView(event) === 'about') void shell.openExternal(HOMEPAGE).catch(error => console.error('Unable to open homepage:', error)); });
+  ipcMain.on('about:close', event => { if (senderView(event) === 'about') { aboutRequest++; aboutOpening = false; about?.hide(); } });
   ipcMain.handle('settings:update', async (event, patch: Partial<Settings>) => {
     if (senderView(event) !== 'settings') return { ok: false, error: '无效窗口' };
     try { const parsed = settingsSchema.partial().parse(patch); if (parsed.autoStart !== undefined) configureAutoStart(parsed.autoStart);
@@ -409,8 +442,8 @@ function setupIpc(): void {
   ipcMain.on('hover', (event, surface: 'floating' | 'detail', inside: boolean) => {
     if (senderView(event) === surface) hover(surface, inside);
   });
-  ipcMain.on('menu:action', (event, action: 'settings' | 'refresh' | 'visibility' | 'update' | 'quit') => { if (senderView(event) === 'menu' && menu?.isVisible()) menuAction(action); });
-  for (const view of ['menu', 'settings']) ipcMain.on(`${view}:ready`, event => {
+  ipcMain.on('menu:action', (event, action: 'settings' | 'refresh' | 'visibility' | 'update' | 'about' | 'quit') => { if (senderView(event) === 'menu' && menu?.isVisible()) menuAction(action); });
+  for (const view of ['menu', 'settings', 'about']) ipcMain.on(`${view}:ready`, event => {
     if (senderView(event) === view) { viewRendered.get(event.sender)?.(); viewRendered.delete(event.sender); }
   });
   ipcMain.on('menu:resize-update', (event, expanded: boolean) => { if (senderView(event) === 'menu') resizeMenu(expanded === true); });
@@ -474,6 +507,7 @@ app.whenReady().then(() => {
   void controller.start().then(() => { if (controller.state.connection.status === 'disconnected' && !config.settings.demo) openSettings(); });
 });
 app.on('before-quit', () => {
+  aboutRequest++;
   settingsRequest++;
   menuRequest++;
   menuWatchAbort?.abort(); stopMenuWatch?.();

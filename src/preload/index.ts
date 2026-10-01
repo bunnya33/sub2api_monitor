@@ -13,6 +13,10 @@ const api: DesktopAPI = {
   verify: (code: string) => ipcRenderer.invoke('auth:verify', code),
   logout: () => ipcRenderer.invoke('auth:logout'),
   refresh: () => ipcRenderer.invoke('quota:refresh'),
+  checkUpdates: () => ipcRenderer.invoke('updates:check'),
+  getAppInfo: () => ipcRenderer.invoke('app:info'),
+  closeAbout: () => ipcRenderer.send('about:close'),
+  openHomepage: () => ipcRenderer.send('app:homepage'),
   setAccountStatus: (id, status) => ipcRenderer.invoke('account:status', id, status),
   setAccountsVisible: visible => ipcRenderer.send('accounts:visible', visible),
   resetAccountQuota: id => ipcRenderer.invoke('account:reset-quota', id),
@@ -25,6 +29,7 @@ const api: DesktopAPI = {
   resizeUpdateMenu: expanded => ipcRenderer.send('menu:resize-update', expanded),
   menuReady: () => ipcRenderer.send('menu:ready'),
   settingsReady: () => ipcRenderer.send('settings:ready'),
+  aboutReady: () => ipcRenderer.send('about:ready'),
   subscribeMenuReset: listener => {
     const handler = () => listener();
     ipcRenderer.on('menu:reset', handler);

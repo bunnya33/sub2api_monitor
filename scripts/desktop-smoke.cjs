@@ -227,8 +227,20 @@ async function buttonColors(button, disabled = false) {
     await menu.waitForSelector('.menu');
     assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('view=detail')).isVisible()), false);
     checks.push('tray context menu closes quota details');
-    assert.equal(await menu.locator('.menu button').count(), 4); checks.push('custom tray context menu opens settings');
-    assert.equal((await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(w => /[?&]view=menu(?:&|$)/.test(w.webContents.getURL())).getBounds())).height, 151);
+    assert.equal(await menu.locator('.menu button').count(), 6); checks.push('custom tray context menu opens settings');
+    assert.equal((await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(w => /[?&]view=menu(?:&|$)/.test(w.webContents.getURL())).getBounds())).height, 226);
+    const idleMenuGeometry = await menu.locator('.menu-content').evaluate(element => ({ height: element.getBoundingClientRect().height,
+      top: element.querySelector('button').getBoundingClientRect().top - element.getBoundingClientRect().top,
+      bottom: element.getBoundingClientRect().bottom - [...element.querySelectorAll('button')].at(-1).getBoundingClientRect().bottom }));
+    assert.equal(idleMenuGeometry.height, 226);
+    assert.ok(Math.abs(idleMenuGeometry.top - idleMenuGeometry.bottom) <= 2);
+    await menu.getByRole('menuitem', { name: '检查更新…', exact: true }).click();
+    if (!process.env.QUOTA_EXECUTABLE) {
+      await menu.getByRole('menuitem', { name: '检查失败，重试', exact: true }).waitFor();
+      assert.equal(await menu.getByRole('menuitem', { name: '检查失败，重试', exact: true }).getAttribute('title'), '开发版不检查线上更新');
+    } else await menu.waitForFunction(() => ![...document.querySelectorAll('.menu button')].some(button => button.textContent.includes('正在检查更新')));
+    await menu.screenshot({ path: path.join(output, 'menu-manual-check.png') });
+    checks.push('tray menu includes a manual check, reports failed checks and has balanced padding');
     const settingsWindow = app.waitForEvent('window', { predicate: window => window.url().includes('view=settings'), timeout: 5000 });
     await menu.getByRole('menuitem', { name: '设置' }).click();
     const settings = await settingsWindow;
@@ -271,6 +283,25 @@ async function buttonColors(button, disabled = false) {
     assert.equal(new Set(settingsLifecycle.map(event => event.id)).size, 1);
     assert.ok(settingsLifecycle.filter(event => event.event === 'show').every(event => event.painted && event.rendered));
     checks.push('settings waits for paint and Vue layout, coalesces duplicate requests and reopens without hide/show flashes');
+    await settings.evaluate(() => window.desktop.closeSettings());
+    const aboutWindowReady = app.waitForEvent('window', { predicate: window => window.url().includes('view=about'), timeout: 5000 });
+    const aboutMenu = await trayRightClick(app, 500, 300);
+    await aboutMenu.getByRole('menuitem', { name: '关于 Sub2API', exact: true }).click();
+    const aboutPage = await aboutWindowReady;
+    await aboutPage.locator('.about-version').waitFor();
+    const appInfo = await aboutPage.evaluate(() => window.desktop.getAppInfo());
+    assert.equal(appInfo.version, require('../package.json').version);
+    assert.equal(await aboutPage.locator('.about-body strong').textContent(), 'Sub2API Quota Monitor');
+    assert.ok((await aboutPage.locator('.about-version').textContent()).includes(appInfo.version));
+    assert.equal((await aboutPage.getByRole('button', { name: '项目主页' }).count()), 1);
+    await aboutPage.screenshot({ path: path.join(output, 'about.png') });
+    await aboutPage.getByRole('button', { name: '关闭关于' }).click();
+    await floating.waitForTimeout(100);
+    assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('view=about')).isVisible()), false);
+    checks.push('About opens a custom window with the real application version and closes normally');
+    const afterAboutMenu = await trayRightClick(app, 500, 300);
+    await afterAboutMenu.getByRole('menuitem', { name: '设置' }).click();
+    await waitSettingsVisible();
     const switchFor = label => settings.getByText(label, { exact: true }).locator('..').locator('.el-switch');
     const isSwitchOn = async label => (await switchFor(label).locator('input').getAttribute('aria-checked')) === 'true';
     const setSwitch = async (label, enabled) => { if (await isSwitchOn(label) !== enabled) await switchFor(label).click(); };
@@ -729,19 +760,21 @@ async function buttonColors(button, disabled = false) {
     }));
     assert.ok(Math.abs((menuGeometry.firstTop - menuGeometry.top) - (menuGeometry.bottom - menuGeometry.lastBottom)) <= 2,
       `menu padding is unbalanced: ${JSON.stringify(menuGeometry)}`);
-    assert.equal((await activeApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(w => /[?&]view=menu(?:&|$)/.test(w.webContents.getURL())).getBounds())).height, 183);
+    assert.equal(await updateMenu.getByRole('menuitem', { name: '检查更新…', exact: true }).count(), 0);
+    assert.equal(await updateMenu.getByRole('menuitem', { name: '关于 Sub2API', exact: true }).count(), 1);
+    assert.equal((await activeApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(w => /[?&]view=menu(?:&|$)/.test(w.webContents.getURL())).getBounds())).height, 226);
     await updateMenu.screenshot({ path: path.join(output, 'menu-with-update.png') });
     await updateMenu.getByRole('menuitem', { name: '更新到 v9.9.9' }).click();
     await updateMenu.locator('.el-popconfirm').waitFor();
     await updateMenu.waitForFunction(() => document.querySelector('.menu')?.classList.contains('expanded'));
-    assert.equal((await activeApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(w => /[?&]view=menu(?:&|$)/.test(w.webContents.getURL())).getBounds())).height, 287);
+    assert.equal((await activeApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(w => /[?&]view=menu(?:&|$)/.test(w.webContents.getURL())).getBounds())).height, 330);
     await updateMenu.screenshot({ path: path.join(output, 'menu-update-confirm.png') });
     await updateMenu.getByRole('button', { name: '取消' }).click();
     await updateMenu.locator('.el-popconfirm').waitFor({ state: 'hidden' });
-    await updateMenu.waitForFunction(() => !document.querySelector('.menu')?.classList.contains('expanded') && document.documentElement.clientHeight === 183);
+    await updateMenu.waitForFunction(() => !document.querySelector('.menu')?.classList.contains('expanded') && document.documentElement.clientHeight === 226);
     assert.equal((await updateFloat.evaluate(() => window.desktop.getState())).update.status, 'available');
     await updateMenu.getByRole('menuitem', { name: '更新到 v9.9.9' }).click();
-    await updateMenu.waitForFunction(() => document.querySelector('.menu')?.classList.contains('expanded') && document.documentElement.clientHeight === 287);
+    await updateMenu.waitForFunction(() => document.querySelector('.menu')?.classList.contains('expanded') && document.documentElement.clientHeight === 330);
     await updateMenu.getByRole('button', { name: '确认' }).click();
     await updateFloat.waitForFunction(async () => (await window.desktop.getState()).update.status === 'downloading');
     await updateFloat.mouse.click(18, 16, { button: 'right' });
